@@ -1,5 +1,5 @@
 import math
-from contextlib import ExitStack, contextmanager
+from contextlib import ExitStack, contextmanager, nullcontext
 from sys import maxunicode
 from time import monotonic
 from typing import Any, Optional, Sequence
@@ -29,28 +29,48 @@ from hypothesis.internal.intervalsets import IntervalSet
 
 
 @contextmanager
-def crosshair_manager(space: StateSpace) -> Any:
-    try:
-        with condition_parser([]):
-            with Patched():
-                with StateSpaceContext(space):
-                    with COMPOSITE_TRACER:
-                        try:
-                            debug("start iter")
-                            yield
-                            debug("end iter (normal)")
-                        except Exception as exc:
-                            try:
-                                exc.args = deep_realize(exc.args)
-                            except:
-                                exc.args = ()
-                            debug("end iter (exception)")
-                            raise
-    finally:
-        debug("bubbling status")
-        _analysis, _exhausted = space.bubble_status(
-            CallAnalysis(VerificationStatus.CONFIRMED)
+def hacky_patchable_run_context_yielding_per_test_case_context():
+
+    # TODO: detect whether this specific test is supposed to use the
+    # crosshair backend (somehow) and return nullcontext if it isn't.
+
+    search_root = RootNode()
+
+    @contextmanager
+    def single_execution_context() -> Any:
+        iter_start = monotonic()
+        options = DEFAULT_OPTIONS.overlay(AnalysisOptionSet(analysis_kind=[]))
+        per_path_timeout = options.get_per_path_timeout()  # TODO: how to set this?
+        space = StateSpace(
+            execution_deadline=iter_start + per_path_timeout,
+            model_check_timeout=per_path_timeout / 2,
+            search_root=search_root,
         )
+        try:
+            with (
+                condition_parser([]),
+                Patched(),
+                StateSpaceContext(space),
+                COMPOSITE_TRACER,
+            ):
+                try:
+                    debug("start iter")
+                    yield
+                    debug("end iter (normal)")
+                except Exception as exc:
+                    try:
+                        exc.args = deep_realize(exc.args)
+                    except:
+                        exc.args = ()
+                    debug(f"end iter ({type(exc)} exception)")
+                    raise
+        finally:
+            debug("bubbling status")
+            _analysis, _exhausted = space.bubble_status(
+                CallAnalysis(VerificationStatus.CONFIRMED)
+            )
+
+    yield single_execution_context
 
 
 class CrossHairPrimitiveProvider(PrimitiveProvider):
@@ -59,27 +79,10 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
     def __init__(self, conjecturedata: object, /) -> None:
         self.name_id = 0
         self.current_exit_stack: Optional[ExitStack] = None
-        self.options = DEFAULT_OPTIONS.overlay(AnalysisOptionSet(analysis_kind=[]))
-        if hasattr(conjecturedata, "_crosshair_search_root"):
-            search_root = conjecturedata._crosshair_search_root
-        else:
-            search_root = RootNode()
-            conjecturedata._crosshair_search_root = search_root
-        self.search_root = search_root
 
     def _next_name(self, prefix: str) -> str:
         self.name_id += 1
         return f"{prefix}_{self.name_id:02d}"
-
-    def get_contxt_manager(self):
-        iter_start = monotonic()
-        per_path_timeout = self.options.get_per_path_timeout()  # TODO: how to set this?
-        self.space = StateSpace(
-            execution_deadline=iter_start + per_path_timeout,
-            model_check_timeout=per_path_timeout / 2,
-            search_root=self.search_root,
-        )
-        return crosshair_manager(self.space)
 
     def draw_boolean(self, p: float = 0.5, *, forced: Optional[bool] = None) -> bool:
         if forced is not None:

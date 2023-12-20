@@ -21,6 +21,7 @@ from crosshair.core import (
     is_tracing,
     proxy_for_type,
 )
+from crosshair.libimpl.builtinslib import SymbolicBoundedIntTuple, LazyIntSymbolicStr
 from hypothesis.internal.conjecture.data import PrimitiveProvider
 from hypothesis.internal.intervalsets import IntervalSet
 
@@ -154,26 +155,9 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
         min_size: int = 0,
         max_size: Optional[int] = None,
     ) -> str:
-        symbolic = proxy_for_type(str, self._next_name("str"), allow_subtypes=False)
-        symbolic_len = len(symbolic)
-        conditions = []
-        if min_size > 0:
-            conditions.append(min_size <= symbolic_len)
-        if max_size is not None:
-            conditions.append(symbolic_len <= max_size)
-        char_ranges = intervals.intervals
-        if char_ranges != (
-            (0, maxunicode),
-        ):  # TODO: is this the default? reference constant in hypothesis
-            for char in symbolic:
-                conditions.append(
-                    any(
-                        [all([u <= char, char <= v]) for u, v in enumerate(char_ranges)]
-                    )
-                )
-        if not all(conditions):
-            raise IgnoreAttempt
-        return symbolic
+        return LazyIntSymbolicStr(SymbolicBoundedIntTuple(
+            intervals, self._next_name("str")
+        ))
 
     def draw_bytes(self, size: int) -> bytes:
         symbolic = proxy_for_type(bytes, self._next_name("bytes"), allow_subtypes=False)

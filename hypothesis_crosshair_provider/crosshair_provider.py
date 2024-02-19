@@ -22,7 +22,11 @@ from hypothesis.internal.intervalsets import IntervalSet
 def hacky_patchable_run_context_yielding_per_test_case_context():
 
     # TODO: detect whether this specific test is supposed to use the
-    # crosshair backend (somehow) and return nullcontext if it isn't.
+    # crosshair backend and return nullcontext if it isn't.
+    # Checking settings.default.backend doesn't appear to reflect decorated settings:
+    # if hypothesis.settings.default.backend != "crosshair":
+    #     yield nullcontext
+    #     return
 
     if "-v" in sys.argv or "-vv" in sys.argv:
         set_debug(True)

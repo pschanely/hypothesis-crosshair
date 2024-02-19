@@ -1,32 +1,21 @@
 import math
-from contextlib import ExitStack, contextmanager, nullcontext
-from sys import maxunicode
+import sys
+from contextlib import ExitStack, contextmanager
 from time import monotonic
 from typing import Any, Optional, Sequence
 
 import crosshair.core_and_libs  # Needed for patch registrations
 from crosshair import debug, deep_realize
-from crosshair.core import (
-    COMPOSITE_TRACER,
-    DEFAULT_OPTIONS,
-    AnalysisOptionSet,
-    CallAnalysis,
-    IgnoreAttempt,
-    Patched,
-    RootNode,
-    StateSpace,
-    StateSpaceContext,
-    VerificationStatus,
-    condition_parser,
-    is_tracing,
-    proxy_for_type,
-)
-from crosshair.libimpl.builtinslib import SymbolicBoundedIntTuple, LazyIntSymbolicStr
+from crosshair.core import (COMPOSITE_TRACER, DEFAULT_OPTIONS,
+                            AnalysisOptionSet, CallAnalysis, IgnoreAttempt,
+                            NoTracing, Patched, RootNode, StateSpace,
+                            StateSpaceContext, VerificationStatus,
+                            condition_parser, is_tracing, proxy_for_type)
+from crosshair.libimpl.builtinslib import (LazyIntSymbolicStr,
+                                           SymbolicBoundedIntTuple)
+from crosshair.util import set_debug
 from hypothesis.internal.conjecture.data import PrimitiveProvider
 from hypothesis.internal.intervalsets import IntervalSet
-
-# from crosshair.util import set_debug
-# set_debug(True)
 
 
 @contextmanager
@@ -35,6 +24,8 @@ def hacky_patchable_run_context_yielding_per_test_case_context():
     # TODO: detect whether this specific test is supposed to use the
     # crosshair backend (somehow) and return nullcontext if it isn't.
 
+    if "-v" in sys.argv or "-vv" in sys.argv:
+        set_debug(True)
     search_root = RootNode()
 
     @contextmanager
@@ -61,15 +52,18 @@ def hacky_patchable_run_context_yielding_per_test_case_context():
                 except Exception as exc:
                     try:
                         exc.args = deep_realize(exc.args)
-                    except:
+                    except Exception:
                         exc.args = ()
                     debug(f"end iter ({type(exc)} exception)")
                     raise
         finally:
-            debug("bubbling status")
-            _analysis, _exhausted = space.bubble_status(
-                CallAnalysis(VerificationStatus.CONFIRMED)
-            )
+            if not space.choices_made:
+                debug("no decisions made; ignoring this iteration")
+            else:
+                debug("bubbling status")
+                _analysis, _exhausted = space.bubble_status(
+                    CallAnalysis(VerificationStatus.CONFIRMED)
+                )
 
     yield single_execution_context
 
@@ -101,6 +95,8 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
         shrink_towards: int = 0,
         forced: Optional[int] = None,
     ) -> int:
+        if forced is not None:
+            return forced
         symbolic = proxy_for_type(int, self._next_name("int"), allow_subtypes=False)
         conditions = []
         if min_value is not None:
@@ -122,10 +118,13 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
         # future.
         # width: Literal[16, 32, 64] = 64,
         # exclude_min and exclude_max handled higher up
+        forced: Optional[float] = None,
     ) -> float:
         # TODO: all of this is a bit of a ruse - at present, CrossHair approximates
         # floats as real numbers. (though it will attempt +/-inf & nan)
         # See https://github.com/pschanely/CrossHair/issues/230
+        if forced is not None:
+            return forced
         symbolic = proxy_for_type(float, self._next_name("float"), allow_subtypes=False)
         conditions = []
         if min_value is not None:
@@ -154,12 +153,23 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
         *,
         min_size: int = 0,
         max_size: Optional[int] = None,
+        forced: Optional[str] = None,
     ) -> str:
-        return LazyIntSymbolicStr(SymbolicBoundedIntTuple(
-            intervals, self._next_name("str")
-        ))
+        with NoTracing():
+            if forced is not None:
+                return forced
+            assert isinstance(intervals, IntervalSet)
+            return LazyIntSymbolicStr(
+                SymbolicBoundedIntTuple(intervals.intervals, self._next_name("str"))
+            )
 
-    def draw_bytes(self, size: int) -> bytes:
+    def draw_bytes(
+        self,
+        size: int,
+        forced: Optional[bytes] = None,
+    ) -> bytes:
+        if forced is not None:
+            return forced
         symbolic = proxy_for_type(bytes, self._next_name("bytes"), allow_subtypes=False)
         if len(symbolic) != size:
             raise IgnoreAttempt

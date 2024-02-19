@@ -13,7 +13,9 @@ setuptools.setup(
     long_description_content_type="text/markdown",
     install_requires=["hypothesis>=6.84.1", "crosshair-tool>=0.0.46"],
     python_requires=">=3.8",
-    entry_points = {"hypothesis": ["_ = hypothesis_crosshair_provider:_hypothesis_setup_hook"]},
+    entry_points={
+        "hypothesis": ["_ = hypothesis_crosshair_provider:_hypothesis_setup_hook"]
+    },
     classifiers=[
         "Development Status :: 4 - Beta",
         "Framework :: Hypothesis",

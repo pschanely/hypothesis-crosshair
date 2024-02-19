@@ -20,9 +20,8 @@ def _hypothesis_setup_hook(*a, **kw):
     AVAILABLE_PROVIDERS[
         "crosshair"
     ] = "hypothesis_crosshair_provider.crosshair_provider.CrossHairPrimitiveProvider"
-    from hypothesis_crosshair_provider.crosshair_provider import (
-        hacky_patchable_run_context_yielding_per_test_case_context,
-    )
+    from hypothesis_crosshair_provider.crosshair_provider import \
+        hacky_patchable_run_context_yielding_per_test_case_context
 
     hypothesis.core.hacky_patchable_run_context_yielding_per_test_case_context = (
         hacky_patchable_run_context_yielding_per_test_case_context

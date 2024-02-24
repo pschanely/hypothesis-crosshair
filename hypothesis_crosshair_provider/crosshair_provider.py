@@ -9,13 +9,16 @@ from crosshair import debug, deep_realize
 from crosshair.core import (COMPOSITE_TRACER, DEFAULT_OPTIONS,
                             AnalysisOptionSet, CallAnalysis, IgnoreAttempt,
                             NoTracing, Patched, RootNode, StateSpace,
-                            StateSpaceContext, VerificationStatus,
-                            condition_parser, is_tracing, proxy_for_type)
+                            StateSpaceContext, UnexploredPath,
+                            VerificationStatus, condition_parser,
+                            context_statespace, is_tracing, proxy_for_type)
 from crosshair.libimpl.builtinslib import (LazyIntSymbolicStr,
                                            SymbolicBoundedIntTuple)
 from crosshair.util import set_debug
 from hypothesis.internal.conjecture.data import PrimitiveProvider
 from hypothesis.internal.intervalsets import IntervalSet
+
+_PREVIOUS_REALIZED_DRAWS = None
 
 
 @contextmanager
@@ -34,6 +37,8 @@ def hacky_patchable_run_context_yielding_per_test_case_context():
 
     @contextmanager
     def single_execution_context() -> Any:
+        global _PREVIOUS_REALIZED_DRAWS
+        _PREVIOUS_REALIZED_DRAWS = None
         iter_start = monotonic()
         options = DEFAULT_OPTIONS.overlay(AnalysisOptionSet(analysis_kind=[]))
         per_path_timeout = options.get_per_path_timeout()  # TODO: how to set this?
@@ -42,6 +47,7 @@ def hacky_patchable_run_context_yielding_per_test_case_context():
             model_check_timeout=per_path_timeout / 2,
             search_root=search_root,
         )
+        space._hypothesis_draws = []  # keep a log of drawn values
         try:
             with (
                 condition_parser([]),
@@ -51,7 +57,14 @@ def hacky_patchable_run_context_yielding_per_test_case_context():
             ):
                 try:
                     debug("start iter")
-                    yield
+                    try:
+                        yield
+                    finally:
+                        space.detach_path()
+                        _PREVIOUS_REALIZED_DRAWS = {
+                            id(symbolic): deep_realize(symbolic)
+                            for symbolic in space._hypothesis_draws
+                        }
                     debug("end iter (normal)")
                 except Exception as exc:
                     try:
@@ -59,7 +72,9 @@ def hacky_patchable_run_context_yielding_per_test_case_context():
                     except Exception:
                         exc.args = ()
                     debug(f"end iter ({type(exc)} exception)")
-                    raise
+                    raise exc
+        except (IgnoreAttempt, UnexploredPath):
+            pass
         finally:
             if not space.choices_made:
                 debug("no decisions made; ignoring this iteration")
@@ -83,11 +98,16 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
         self.name_id += 1
         return f"{prefix}_{self.name_id:02d}"
 
+    def _remember_draw(self, symbolic):
+        context_statespace()._hypothesis_draws.append(symbolic)
+
     def draw_boolean(self, p: float = 0.5, *, forced: Optional[bool] = None) -> bool:
         if forced is not None:
             return forced
 
-        return proxy_for_type(bool, self._next_name("bool"), allow_subtypes=False)
+        symbolic = proxy_for_type(bool, self._next_name("bool"), allow_subtypes=False)
+        self._remember_draw(symbolic)
+        return symbolic
 
     def draw_integer(
         self,
@@ -109,6 +129,7 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
             conditions.append(symbolic <= max_value)
         if not all(conditions):
             raise IgnoreAttempt
+        self._remember_draw(symbolic)
         return symbolic
 
     def draw_float(
@@ -117,7 +138,7 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
         min_value: float = -math.inf,
         max_value: float = math.inf,
         allow_nan: bool = True,
-        smallest_nonzero_magnitude: float,
+        smallest_nonzero_magnitude: Optional[float] = None,
         # TODO: consider supporting these float widths at the IR level in the
         # future.
         # width: Literal[16, 32, 64] = 64,
@@ -149,6 +170,7 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
             conditions.append(math.isnan(symbolic))
         if not all(conditions):
             raise IgnoreAttempt
+        self._remember_draw(symbolic)
         return symbolic
 
     def draw_string(
@@ -163,9 +185,11 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
             if forced is not None:
                 return forced
             assert isinstance(intervals, IntervalSet)
-            return LazyIntSymbolicStr(
+            symbolic = LazyIntSymbolicStr(
                 SymbolicBoundedIntTuple(intervals.intervals, self._next_name("str"))
             )
+            self._remember_draw(symbolic)
+            return symbolic
 
     def draw_bytes(
         self,
@@ -177,11 +201,12 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
         symbolic = proxy_for_type(bytes, self._next_name("bytes"), allow_subtypes=False)
         if len(symbolic) != size:
             raise IgnoreAttempt
+        self._remember_draw(symbolic)
         return symbolic
 
     def export_value(self, value):
         if is_tracing():
             return deep_realize(value)
         else:
-            with self.get_contxt_manager():
-                return deep_realize(value)
+            global _PREVIOUS_REALIZED_DRAWS
+            return _PREVIOUS_REALIZED_DRAWS.get(id(value))

@@ -37,6 +37,12 @@ def hacky_patchable_run_context_yielding_per_test_case_context():
 
     @contextmanager
     def single_execution_context() -> Any:
+        nonlocal search_root
+        if search_root.child.is_exhausted():
+            debug("Resetting search root")
+            # might be nice to signal that we're done somehow.
+            # But for now, just start over!
+            search_root = RootNode()
         global _PREVIOUS_REALIZED_DRAWS
         _PREVIOUS_REALIZED_DRAWS = None
         iter_start = monotonic()
@@ -67,6 +73,11 @@ def hacky_patchable_run_context_yielding_per_test_case_context():
                                 id(symbolic): deep_realize(symbolic)
                                 for symbolic in space._hypothesis_draws
                             }
+                        else:
+                            # TODO: I can't detach_path here because it will conflict with the
+                            # top node of a prior "real" execution.
+                            # Should I just generate a dummy concrete value for each of the draws?
+                            _PREVIOUS_REALIZED_DRAWS = {}
                     debug("end iter (normal)")
                 except Exception as exc:
                     try:

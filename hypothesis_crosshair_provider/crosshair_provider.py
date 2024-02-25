@@ -14,7 +14,7 @@ from crosshair.core import (COMPOSITE_TRACER, DEFAULT_OPTIONS,
                             context_statespace, is_tracing, proxy_for_type)
 from crosshair.libimpl.builtinslib import (LazyIntSymbolicStr,
                                            SymbolicBoundedIntTuple)
-from crosshair.util import set_debug
+from crosshair.util import set_debug, test_stack
 from hypothesis.internal.conjecture.data import PrimitiveProvider
 from hypothesis.internal.intervalsets import IntervalSet
 
@@ -60,29 +60,34 @@ def hacky_patchable_run_context_yielding_per_test_case_context():
                     try:
                         yield
                     finally:
-                        space.detach_path()
-                        _PREVIOUS_REALIZED_DRAWS = {
-                            id(symbolic): deep_realize(symbolic)
-                            for symbolic in space._hypothesis_draws
-                        }
+                        any_choices_made = bool(space.choices_made)
+                        if any_choices_made:
+                            space.detach_path()
+                            _PREVIOUS_REALIZED_DRAWS = {
+                                id(symbolic): deep_realize(symbolic)
+                                for symbolic in space._hypothesis_draws
+                            }
                     debug("end iter (normal)")
                 except Exception as exc:
                     try:
                         exc.args = deep_realize(exc.args)
                     except Exception:
                         exc.args = ()
-                    debug(f"end iter ({type(exc)} exception)")
+                    debug(
+                        f"end iter ({type(exc)} exception)",
+                        test_stack(exc.__traceback__),
+                    )
                     raise exc
         except (IgnoreAttempt, UnexploredPath):
             pass
         finally:
-            if not space.choices_made:
-                debug("no decisions made; ignoring this iteration")
-            else:
+            if any_choices_made:
                 debug("bubbling status")
                 _analysis, _exhausted = space.bubble_status(
                     CallAnalysis(VerificationStatus.CONFIRMED)
                 )
+            else:
+                debug("no decisions made; ignoring this iteration")
 
     yield single_execution_context
 
@@ -209,4 +214,10 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
             return deep_realize(value)
         else:
             global _PREVIOUS_REALIZED_DRAWS
+            if _PREVIOUS_REALIZED_DRAWS is None:
+                debug("WARNING: export_value() requested at wrong time", test_stack())
+                return None
             return _PREVIOUS_REALIZED_DRAWS.get(id(value))
+
+    def post_test_case_hook(self, val):
+        return self.export_value(val)

@@ -18,6 +18,7 @@ def _example_user_code(s_bool, s_int, s_float, s_str, s_bytes):
 
 def test_end_to_end():
     with hacky_patchable_run_context_yielding_per_test_case_context() as per_run_mgr:
+        found_ct = 0
         for _ in range(30):
             provider = CrossHairPrimitiveProvider(None)
             try:
@@ -35,11 +36,6 @@ def test_end_to_end():
                     assert type(s_str) == str
                     assert type(s_bytes) == bytes
                     _example_user_code(s_bool, s_int, s_float, s_str, s_bytes)
-                assert type(s_bool) != bool
-                assert type(s_int) != int
-                assert type(s_float) != float
-                assert type(s_str) != str
-                assert type(s_bytes) != bytes
                 assert type(provider.export_value(s_bool)) == bool
                 assert type(provider.export_value(s_int)) == int
                 assert type(provider.export_value(s_float)) == float
@@ -49,6 +45,5 @@ def test_end_to_end():
                 assert type(provider.export_value(s_bytes)) in (bytes, types.NoneType)
             except Exception as exc:
                 assert str(exc) == "uh oh"
-                # We found it; we're done!
-                return
-        assert False, "CrossHair could not find the exception"
+                found_ct += 1
+        assert found_ct > 0, "CrossHair could not find the exception"

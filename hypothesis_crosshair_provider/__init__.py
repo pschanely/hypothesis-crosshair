@@ -26,4 +26,3 @@ def _hypothesis_setup_hook(*a, **kw):
     hypothesis.core.hacky_patchable_run_context_yielding_per_test_case_context = (
         hacky_patchable_run_context_yielding_per_test_case_context
     )
-    print("CrossHair registration complete")

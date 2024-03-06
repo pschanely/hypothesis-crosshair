@@ -19,30 +19,29 @@ from crosshair.util import set_debug, test_stack
 from hypothesis.internal.conjecture.data import PrimitiveProvider
 from hypothesis.internal.intervalsets import IntervalSet
 
-_PREVIOUS_REALIZED_DRAWS = None
-
 
 class CrossHairPrimitiveProvider(PrimitiveProvider):
     """An implementation of PrimitiveProvider based on CrossHair."""
 
     def __init__(self, *_a, **_kw) -> None:
-        self.name_id = 0
+        self.iteration_number = 0
         self.current_exit_stack: Optional[ExitStack] = None
         self.search_root = RootNode()
         if len(os.environ.get("DEBUG_CROSSHAIR", "")) > 1:
             set_debug(os.environ["DEBUG_CROSSHAIR"].lower() not in ("0", "false"))
         elif "-vv" in sys.argv:
             set_debug(True)
+        self._previous_realized_draws = None
 
     @contextmanager
     def per_test_case_context_manager(self):
+        self.iteration_number += 1
         if self.search_root.child.is_exhausted():
             debug("Resetting search root")
             # might be nice to signal that we're done somehow.
             # But for now, just start over!
             self.search_root = RootNode()
-        global _PREVIOUS_REALIZED_DRAWS
-        _PREVIOUS_REALIZED_DRAWS = None
+        self._previous_realized_draws = None
         iter_start = monotonic()
         options = DEFAULT_OPTIONS.overlay(AnalysisOptionSet(analysis_kind=[]))
         per_path_timeout = options.get_per_path_timeout()  # TODO: how to set this?
@@ -52,6 +51,10 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
             search_root=self.search_root,
         )
         space._hypothesis_draws = []  # keep a log of drawn values
+        space._hypothesis_next_name_id = (
+            0  # something to uniqu-ify names for drawn values
+        )
+
         try:
             with (
                 condition_parser([]),
@@ -60,14 +63,14 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                 COMPOSITE_TRACER,
             ):
                 try:
-                    debug("start iter")
+                    debug("starting iteration", self.iteration_number)
                     try:
                         yield
                     finally:
                         any_choices_made = bool(space.choices_made)
                         if any_choices_made:
                             space.detach_path()
-                            _PREVIOUS_REALIZED_DRAWS = {
+                            self._previous_realized_draws = {
                                 id(symbolic): deep_realize(symbolic)
                                 for symbolic in space._hypothesis_draws
                             }
@@ -75,19 +78,19 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                             # TODO: I can't detach_path here because it will conflict with the
                             # top node of a prior "real" execution.
                             # Should I just generate a dummy concrete value for each of the draws?
-                            _PREVIOUS_REALIZED_DRAWS = {}
-                    debug("end iter (normal)")
+                            self._previous_realized_draws = {}
+                    debug("ended iteration (normal completion)")
                 except Exception as exc:
                     try:
                         exc.args = deep_realize(exc.args)
                         debug(
-                            f"end iter (exception: {type(exc).__name__}: {exc})",
+                            f"ended iteration (exception: {type(exc).__name__}: {exc})",
                             test_stack(exc.__traceback__),
                         )
                     except Exception:
                         exc.args = ()
                         debug(
-                            f"end iter ({type(exc)} exception)",
+                            f"ended iteration ({type(exc)} exception)",
                             test_stack(exc.__traceback__),
                         )
                     raise exc
@@ -101,14 +104,22 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                 )
             else:
                 debug("no decisions made; ignoring this iteration")
+
     def _next_name(self, prefix: str) -> str:
-        self.name_id += 1
-        return f"{prefix}_{self.name_id:02d}"
+        space = context_statespace()
+        space._hypothesis_next_name_id += 1
+        return f"{prefix}_{space._hypothesis_next_name_id:02d}"
 
     def _remember_draw(self, symbolic):
         context_statespace()._hypothesis_draws.append(symbolic)
 
-    def draw_boolean(self, p: float = 0.5, *, forced: Optional[bool] = None) -> bool:
+    def draw_boolean(
+        self,
+        p: float = 0.5,
+        *,
+        forced: Optional[bool] = None,
+        fake_forced: bool = False,
+    ) -> bool:
         if forced is not None:
             return forced
 
@@ -125,6 +136,7 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
         weights: Optional[Sequence[float]] = None,
         shrink_towards: int = 0,
         forced: Optional[int] = None,
+        fake_forced: bool = False,
     ) -> int:
         if forced is not None:
             return forced
@@ -151,6 +163,7 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
         # width: Literal[16, 32, 64] = 64,
         # exclude_min and exclude_max handled higher up
         forced: Optional[float] = None,
+        fake_forced: bool = False,
     ) -> float:
         # TODO: all of this is a bit of a ruse - at present, CrossHair approximates
         # floats as real numbers. (though it will attempt +/-inf & nan)
@@ -187,6 +200,7 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
         min_size: int = 0,
         max_size: Optional[int] = None,
         forced: Optional[str] = None,
+        fake_forced: bool = False,
     ) -> str:
         with NoTracing():
             if forced is not None:
@@ -202,6 +216,7 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
         self,
         size: int,
         forced: Optional[bytes] = None,
+        fake_forced: bool = False,
     ) -> bytes:
         if forced is not None:
             return forced
@@ -215,11 +230,10 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
         if is_tracing():
             return deep_realize(value)
         else:
-            global _PREVIOUS_REALIZED_DRAWS
-            if _PREVIOUS_REALIZED_DRAWS is None:
+            if self._previous_realized_draws is None:
                 debug("WARNING: export_value() requested at wrong time", test_stack())
-                return None
-            return _PREVIOUS_REALIZED_DRAWS.get(id(value))
+                return value
+            return self._previous_realized_draws.get(id(value), value)
 
     def post_test_case_hook(self, val):
         return self.export_value(val)

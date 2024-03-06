@@ -4,7 +4,7 @@ from hypothesis.internal.intervalsets import IntervalSet
 
 from hypothesis_crosshair_provider.crosshair_provider import (
     CrossHairPrimitiveProvider,
-    hacky_patchable_run_context_yielding_per_test_case_context)
+    )
 
 
 def _example_user_code(s_bool, s_int, s_float, s_str, s_bytes):
@@ -17,10 +17,10 @@ def _example_user_code(s_bool, s_int, s_float, s_str, s_bytes):
 
 
 def test_end_to_end():
-    with hacky_patchable_run_context_yielding_per_test_case_context() as per_run_mgr:
+    provider = CrossHairPrimitiveProvider()
+    with provider.per_test_case_context_manager() as per_run_mgr:
         found_ct = 0
         for _ in range(30):
-            provider = CrossHairPrimitiveProvider(None)
             try:
                 with per_run_mgr():
                     s_bool = provider.draw_boolean()

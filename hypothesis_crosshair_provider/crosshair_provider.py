@@ -1,4 +1,5 @@
 import math
+import os
 import sys
 from contextlib import ExitStack, contextmanager
 from time import monotonic
@@ -21,28 +22,25 @@ from hypothesis.internal.intervalsets import IntervalSet
 _PREVIOUS_REALIZED_DRAWS = None
 
 
-@contextmanager
-def hacky_patchable_run_context_yielding_per_test_case_context():
+class CrossHairPrimitiveProvider(PrimitiveProvider):
+    """An implementation of PrimitiveProvider based on CrossHair."""
 
-    # TODO: detect whether this specific test is supposed to use the
-    # crosshair backend and return nullcontext if it isn't.
-    # Checking settings.default.backend doesn't appear to reflect decorated settings:
-    # if hypothesis.settings.default.backend != "crosshair":
-    #     yield nullcontext
-    #     return
-
-    if "-v" in sys.argv or "-vv" in sys.argv:
-        set_debug(True)
-    search_root = RootNode()
+    def __init__(self, *_a, **_kw) -> None:
+        self.name_id = 0
+        self.current_exit_stack: Optional[ExitStack] = None
+        self.search_root = RootNode()
+        if len(os.environ.get("DEBUG_CROSSHAIR", "")) > 1:
+            set_debug(os.environ["DEBUG_CROSSHAIR"].lower() not in ("0", "false"))
+        elif "-vv" in sys.argv:
+            set_debug(True)
 
     @contextmanager
-    def single_execution_context() -> Any:
-        nonlocal search_root
-        if search_root.child.is_exhausted():
+    def per_test_case_context_manager(self):
+        if self.search_root.child.is_exhausted():
             debug("Resetting search root")
             # might be nice to signal that we're done somehow.
             # But for now, just start over!
-            search_root = RootNode()
+            self.search_root = RootNode()
         global _PREVIOUS_REALIZED_DRAWS
         _PREVIOUS_REALIZED_DRAWS = None
         iter_start = monotonic()
@@ -51,7 +49,7 @@ def hacky_patchable_run_context_yielding_per_test_case_context():
         space = StateSpace(
             execution_deadline=iter_start + per_path_timeout,
             model_check_timeout=per_path_timeout / 2,
-            search_root=search_root,
+            search_root=self.search_root,
         )
         space._hypothesis_draws = []  # keep a log of drawn values
         try:
@@ -82,14 +80,18 @@ def hacky_patchable_run_context_yielding_per_test_case_context():
                 except Exception as exc:
                     try:
                         exc.args = deep_realize(exc.args)
+                        debug(
+                            f"end iter (exception: {type(exc).__name__}: {exc})",
+                            test_stack(exc.__traceback__),
+                        )
                     except Exception:
                         exc.args = ()
-                    debug(
-                        f"end iter ({type(exc)} exception)",
-                        test_stack(exc.__traceback__),
-                    )
+                        debug(
+                            f"end iter ({type(exc)} exception)",
+                            test_stack(exc.__traceback__),
+                        )
                     raise exc
-        except (IgnoreAttempt, UnexploredPath):
+        except (IgnoreAttempt, UnexploredPath) as e:
             pass
         finally:
             if any_choices_made:
@@ -99,17 +101,6 @@ def hacky_patchable_run_context_yielding_per_test_case_context():
                 )
             else:
                 debug("no decisions made; ignoring this iteration")
-
-    yield single_execution_context
-
-
-class CrossHairPrimitiveProvider(PrimitiveProvider):
-    """An implementation of PrimitiveProvider based on CrossHair."""
-
-    def __init__(self, conjecturedata: object, /) -> None:
-        self.name_id = 0
-        self.current_exit_stack: Optional[ExitStack] = None
-
     def _next_name(self, prefix: str) -> str:
         self.name_id += 1
         return f"{prefix}_{self.name_id:02d}"

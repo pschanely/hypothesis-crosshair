@@ -11,13 +11,13 @@ setuptools.setup(
     description="Level-up your Hypothesis tests with CrossHair.",
     long_description=open("README.md", encoding="utf-8").read(),
     long_description_content_type="text/markdown",
-    install_requires=["hypothesis>=6.84.1", "crosshair-tool>=0.0.46"],
+    install_requires=["hypothesis>=6.84.1", "crosshair-tool>=0.0.49"],
     python_requires=">=3.8",
     entry_points={
         "hypothesis": ["_ = hypothesis_crosshair_provider:_hypothesis_setup_hook"]
     },
     classifiers=[
-        "Development Status :: 4 - Beta",
+        "Development Status :: 2 - Pre-Alpha",
         "Framework :: Hypothesis",
         "Intended Audience :: Developers",
         "License :: OSI Approved :: MIT License",
@@ -28,6 +28,7 @@ setuptools.setup(
         "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
+        "Programming Language :: Python :: 3.12",
         "Topic :: Software Development :: Testing",
     ],
 )

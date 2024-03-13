@@ -160,4 +160,4 @@ cython_debug/
 #.idea/
 
 # hypothesis-crosshair specific:
-example.py
+example*.py

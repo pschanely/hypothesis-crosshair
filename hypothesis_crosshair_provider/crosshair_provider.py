@@ -12,6 +12,7 @@ from crosshair.core import (COMPOSITE_TRACER, DEFAULT_OPTIONS,
                             NoTracing, Patched, RootNode, StateSpace,
                             StateSpaceContext, UnexploredPath,
                             VerificationStatus, condition_parser,
+                            get_current_parser,
                             context_statespace, is_tracing, proxy_for_type)
 from crosshair.libimpl.builtinslib import (LazyIntSymbolicStr,
                                            SymbolicBoundedIntTuple)
@@ -62,6 +63,9 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                 StateSpaceContext(space),
                 COMPOSITE_TRACER,
             ):
+                # Force removal of manually registered contracts:
+                get_current_parser().parsers[:] = []
+
                 try:
                     debug("starting iteration", self.iteration_number)
                     try:
@@ -108,7 +112,9 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
     def _next_name(self, prefix: str) -> str:
         space = context_statespace()
         space._hypothesis_next_name_id += 1
-        return f"{prefix}_{space._hypothesis_next_name_id:02d}"
+        name = f"{prefix}_{space._hypothesis_next_name_id:02d}"
+        debug("Drawing", name)
+        return name
 
     def _remember_draw(self, symbolic):
         context_statespace()._hypothesis_draws.append(symbolic)
@@ -172,6 +178,8 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
             return forced
         symbolic = proxy_for_type(float, self._next_name("float"), allow_subtypes=False)
         conditions = []
+        if not allow_nan:
+            conditions.append(math.isnan(symbolic))
         if min_value is not None:
             conditions.append(min_value <= symbolic)
         if max_value is not None:
@@ -186,8 +194,6 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                     ]
                 )
             )
-        if not allow_nan:
-            conditions.append(math.isnan(symbolic))
         if not all(conditions):
             raise IgnoreAttempt
         self._remember_draw(symbolic)

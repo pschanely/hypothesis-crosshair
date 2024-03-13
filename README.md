@@ -1,4 +1,8 @@
 # hypothesis-crosshair
+
+[![Downloads](https://pepy.tech/badge/hypothesis-crosshair)](https://pepy.tech/project/hypothesis-crosshair)
+
+
 Add the power of solver-based symbolic execution to your
 [Hypothesis](https://hypothesis.readthedocs.io/en/latest/index.html)
 tests with

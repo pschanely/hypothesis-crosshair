@@ -126,12 +126,13 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
         forced: Optional[bool] = None,
         fake_forced: bool = False,
     ) -> bool:
-        if forced is not None:
-            return forced
+        with NoTracing():
+            if forced is not None:
+                return forced
 
-        symbolic = proxy_for_type(bool, self._next_name("bool"), allow_subtypes=False)
-        self._remember_draw(symbolic)
-        return symbolic
+            symbolic = proxy_for_type(bool, self._next_name("bool"), allow_subtypes=False)
+            self._remember_draw(symbolic)
+            return symbolic
 
     def draw_integer(
         self,
@@ -144,9 +145,10 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
         forced: Optional[int] = None,
         fake_forced: bool = False,
     ) -> int:
-        if forced is not None:
-            return forced
-        symbolic = proxy_for_type(int, self._next_name("int"), allow_subtypes=False)
+        with NoTracing():
+            if forced is not None:
+                return forced
+            symbolic = proxy_for_type(int, self._next_name("int"), allow_subtypes=False)
         conditions = []
         if min_value is not None:
             conditions.append(min_value <= symbolic)
@@ -154,7 +156,8 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
             conditions.append(symbolic <= max_value)
         if not all(conditions):
             raise IgnoreAttempt
-        self._remember_draw(symbolic)
+        with NoTracing():
+            self._remember_draw(symbolic)
         return symbolic
 
     def draw_float(
@@ -174,9 +177,10 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
         # TODO: all of this is a bit of a ruse - at present, CrossHair approximates
         # floats as real numbers. (though it will attempt +/-inf & nan)
         # See https://github.com/pschanely/CrossHair/issues/230
-        if forced is not None:
-            return forced
-        symbolic = proxy_for_type(float, self._next_name("float"), allow_subtypes=False)
+        with NoTracing():
+            if forced is not None:
+                return forced
+            symbolic = proxy_for_type(float, self._next_name("float"), allow_subtypes=False)
         conditions = []
         if not allow_nan:
             conditions.append(math.isnan(symbolic))
@@ -196,7 +200,8 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
             )
         if not all(conditions):
             raise IgnoreAttempt
-        self._remember_draw(symbolic)
+        with NoTracing():
+            self._remember_draw(symbolic)
         return symbolic
 
     def draw_string(
@@ -224,13 +229,15 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
         forced: Optional[bytes] = None,
         fake_forced: bool = False,
     ) -> bytes:
-        if forced is not None:
-            return forced
-        symbolic = proxy_for_type(bytes, self._next_name("bytes"), allow_subtypes=False)
+        with NoTracing():
+            if forced is not None:
+                return forced
+            symbolic = proxy_for_type(bytes, self._next_name("bytes"), allow_subtypes=False)
         if len(symbolic) != size:
             raise IgnoreAttempt
-        self._remember_draw(symbolic)
-        return symbolic
+        with NoTracing():
+            self._remember_draw(symbolic)
+            return symbolic
 
     def export_value(self, value):
         if is_tracing():

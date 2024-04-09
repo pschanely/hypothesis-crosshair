@@ -25,6 +25,6 @@ def test_needs_solver(x):
 ```
 
 
-Docs hopefully comming soon. In the meantime, start a
+Docs hopefully coming soon. In the meantime, start a
 [discussion](https://github.com/pschanely/hypothesis-crosshair/discussions)
 or file an [issue](https://github.com/pschanely/hypothesis-crosshair/issues).

@@ -48,3 +48,29 @@ def test_end_to_end():
         except TargetException:
             found_ct += 1
     assert found_ct > 0, "CrossHair could not find the exception"
+
+
+def test_post_run_value_export():
+    provider = CrossHairPrimitiveProvider()
+    with provider.per_test_case_context_manager():
+        s_int = provider.draw_integer()
+        if s_int > 10:
+            pass
+    assert type(provider.export_value(s_int)) is int
+    assert type(provider.export_value([s_int])[0]) is int
+
+
+def test_post_run_decisions_do_not_grow_the_search_tree():
+    provider = CrossHairPrimitiveProvider()
+    # There should only be one real branch; so it will take 2 iterations to exhaust
+    for _ in range(2):
+        with provider.per_test_case_context_manager():
+            s_int = provider.draw_integer()
+            if s_int > 10:
+                pass
+        with provider.post_test_case_context_manager():
+            if s_int + 1 > 100:
+                pass
+        assert not provider.exhausted
+    with provider.per_test_case_context_manager():
+        assert provider.exhausted

@@ -7,7 +7,7 @@ def _hypothesis_setup_hook(*a, **kw):
         from hypothesis.internal.conjecture.data import AVAILABLE_PROVIDERS
     except ImportError:
         warnings.warn(
-            f"This version of hypothesis doesn't support the CrossHair backend"
+            "This version of hypothesis doesn't support the CrossHair backend"
         )
         return
     AVAILABLE_PROVIDERS[

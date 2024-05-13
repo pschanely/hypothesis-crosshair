@@ -3,7 +3,7 @@ import os
 import sys
 from contextlib import ExitStack, contextmanager
 from time import monotonic
-from typing import Any, Optional, Sequence
+from typing import Optional, Sequence
 
 import crosshair.core_and_libs  # Needed for patch registrations
 from crosshair import debug, deep_realize
@@ -12,10 +12,11 @@ from crosshair.core import (COMPOSITE_TRACER, DEFAULT_OPTIONS,
                             NoTracing, Patched, RootNode, StateSpace,
                             StateSpaceContext, UnexploredPath,
                             VerificationStatus, condition_parser,
-                            get_current_parser,
-                            context_statespace, is_tracing, proxy_for_type)
+                            context_statespace, get_current_parser, is_tracing,
+                            proxy_for_type)
 from crosshair.libimpl.builtinslib import (LazyIntSymbolicStr,
                                            SymbolicBoundedIntTuple)
+from crosshair.statespace import DeatchedPathNode
 from crosshair.util import set_debug, test_stack
 from hypothesis.internal.conjecture.data import PrimitiveProvider
 from hypothesis.internal.intervalsets import IntervalSet
@@ -32,20 +33,29 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
             set_debug(os.environ["DEBUG_CROSSHAIR"].lower() not in ("0", "false"))
         elif "-vv" in sys.argv:
             set_debug(True)
+        self._previous_space = None
         self._previous_realized_draws = None
+        self.exhausted = False
 
     @contextmanager
-    def per_test_case_context_manager(self):
-        self.iteration_number += 1
-        if self.search_root.child.is_exhausted():
-            debug("Resetting search root")
-            # might be nice to signal that we're done somehow.
-            # But for now, just start over!
-            self.search_root = RootNode()
-        self._previous_realized_draws = None
-        iter_start = monotonic()
+    def post_test_case_context_manager(self):
+        assert self._previous_space is not None
+        with (
+            condition_parser([]),
+            Patched(),
+            StateSpaceContext(self._previous_space),
+            COMPOSITE_TRACER,
+        ):
+            # IgnoreAttempt is possible here in theory, but hopefully won't happen because we've
+            # already fixed the drawn values
+            yield
+
+    def _make_statespace(self):
         options = DEFAULT_OPTIONS.overlay(AnalysisOptionSet(analysis_kind=[]))
-        per_path_timeout = options.get_per_path_timeout()  # TODO: how to set this?
+        per_path_timeout = (
+            2.0  # TODO: use hypothesis.settings.deadline * 10 or something?
+        )
+        iter_start = monotonic()
         space = StateSpace(
             execution_deadline=iter_start + per_path_timeout,
             model_check_timeout=per_path_timeout / 2,
@@ -55,6 +65,24 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
         space._hypothesis_next_name_id = (
             0  # something to uniqu-ify names for drawn values
         )
+        return space
+
+    @contextmanager
+    def per_test_case_context_manager(self):
+        if self._previous_space is not None:
+            _analysis, _exhausted = self._previous_space.bubble_status(
+                CallAnalysis(VerificationStatus.CONFIRMED)
+            )
+        self.iteration_number += 1
+        if self.search_root.child.is_exhausted():
+            self.exhausted = True
+            debug("Resetting search root")
+            # might be nice to signal that we're done somehow.
+            # But for now, just start over!
+            self.search_root = RootNode()
+        self._previous_realized_draws = None
+        self._previous_space = None
+        space = self._make_statespace()
 
         try:
             with (
@@ -74,15 +102,14 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                         any_choices_made = bool(space.choices_made)
                         if any_choices_made:
                             space.detach_path()
-                            self._previous_realized_draws = {
-                                id(symbolic): deep_realize(symbolic)
-                                for symbolic in space._hypothesis_draws
-                            }
                         else:
-                            # TODO: I can't detach_path here because it will conflict with the
+                            # NOTE: I can't detach_path here because it will conflict with the
                             # top node of a prior "real" execution.
-                            # Should I just generate a dummy concrete value for each of the draws?
-                            self._previous_realized_draws = {}
+                            space._search_position = DeatchedPathNode()
+                        self._previous_realized_draws = {
+                            id(symbolic): deep_realize(symbolic)
+                            for symbolic in space._hypothesis_draws
+                        }
                     debug("ended iteration (normal completion)")
                 except Exception as exc:
                     try:
@@ -98,14 +125,12 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                             test_stack(exc.__traceback__),
                         )
                     raise exc
-        except (IgnoreAttempt, UnexploredPath) as e:
+        except (IgnoreAttempt, UnexploredPath):
             pass
         finally:
+            self._previous_space = space
             if any_choices_made:
                 debug("bubbling status")
-                _analysis, _exhausted = space.bubble_status(
-                    CallAnalysis(VerificationStatus.CONFIRMED)
-                )
             else:
                 debug("no decisions made; ignoring this iteration")
 
@@ -130,7 +155,9 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
             if forced is not None:
                 return forced
 
-            symbolic = proxy_for_type(bool, self._next_name("bool"), allow_subtypes=False)
+            symbolic = proxy_for_type(
+                bool, self._next_name("bool"), allow_subtypes=False
+            )
             self._remember_draw(symbolic)
             return symbolic
 
@@ -180,7 +207,9 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
         with NoTracing():
             if forced is not None:
                 return forced
-            symbolic = proxy_for_type(float, self._next_name("float"), allow_subtypes=False)
+            symbolic = proxy_for_type(
+                float, self._next_name("float"), allow_subtypes=False
+            )
         conditions = []
         if not allow_nan:
             conditions.append(math.isnan(symbolic))
@@ -232,7 +261,9 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
         with NoTracing():
             if forced is not None:
                 return forced
-            symbolic = proxy_for_type(bytes, self._next_name("bytes"), allow_subtypes=False)
+            symbolic = proxy_for_type(
+                bytes, self._next_name("bytes"), allow_subtypes=False
+            )
         if len(symbolic) != size:
             raise IgnoreAttempt
         with NoTracing():
@@ -242,11 +273,14 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
     def export_value(self, value):
         if is_tracing():
             return deep_realize(value)
+        elif self._previous_realized_draws is None:
+            debug("WARNING: export_value() requested before test case complered", test_stack())
+            return value
+        elif id(value) in self._previous_realized_draws:
+            return self._previous_realized_draws[id(value)]
         else:
-            if self._previous_realized_draws is None:
-                debug("WARNING: export_value() requested at wrong time", test_stack())
-                return value
-            return self._previous_realized_draws.get(id(value), value)
+            with self.post_test_case_context_manager():
+                return deep_realize(value)
 
     def post_test_case_hook(self, val):
         return self.export_value(val)

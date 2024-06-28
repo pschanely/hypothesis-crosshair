@@ -105,7 +105,7 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                         else:
                             # NOTE: I can't detach_path here because it will conflict with the
                             # top node of a prior "real" execution.
-                            space._search_position = DeatchedPathNode()
+                            space._search_position = DeatchedPathNode().child
                         self._previous_realized_draws = {
                             id(symbolic): deep_realize(symbolic)
                             for symbolic in space._hypothesis_draws
@@ -274,7 +274,7 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
         if is_tracing():
             return deep_realize(value)
         elif self._previous_realized_draws is None:
-            debug("WARNING: export_value() requested before test case complered", test_stack())
+            debug("WARNING: export_value() requested before test case completed", test_stack())
             return value
         elif id(value) in self._previous_realized_draws:
             return self._previous_realized_draws[id(value)]

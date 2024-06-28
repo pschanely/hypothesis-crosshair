@@ -74,3 +74,10 @@ def test_post_run_decisions_do_not_grow_the_search_tree():
         assert not provider.exhausted
     with provider.per_test_case_context_manager():
         assert provider.exhausted
+
+
+def test_value_export_with_no_decisions():
+    provider = CrossHairPrimitiveProvider()
+    with provider.per_test_case_context_manager():
+        s_int = provider.draw_integer()
+    assert type(provider.export_value(s_int)) is int

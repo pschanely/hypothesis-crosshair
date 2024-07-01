@@ -210,25 +210,27 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
             symbolic = proxy_for_type(
                 float, self._next_name("float"), allow_subtypes=False
             )
-        conditions = []
-        if not allow_nan:
-            conditions.append(math.isnan(symbolic))
-        if min_value is not None:
-            conditions.append(min_value <= symbolic)
-        if max_value is not None:
-            conditions.append(symbolic <= max_value)
-        if smallest_nonzero_magnitude:
-            conditions.append(
-                any(
-                    [
-                        symbolic < -smallest_nonzero_magnitude,
-                        symbolic == 0,
-                        symbolic > smallest_nonzero_magnitude,
-                    ]
+        if math.isnan(symbolic):
+            if not allow_nan:
+                raise IgnoreAttempt
+        else:
+            conditions = []
+            if min_value is not None:
+                conditions.append(min_value <= symbolic)
+            if max_value is not None:
+                conditions.append(symbolic <= max_value)
+            if smallest_nonzero_magnitude:
+                conditions.append(
+                    any(
+                        [
+                            symbolic <= -smallest_nonzero_magnitude,
+                            symbolic == 0,
+                            symbolic >= smallest_nonzero_magnitude,
+                        ]
+                    )
                 )
-            )
-        if not all(conditions):
-            raise IgnoreAttempt
+            if not all(conditions):
+                raise IgnoreAttempt
         with NoTracing():
             self._remember_draw(symbolic)
         return symbolic
@@ -249,6 +251,10 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
             symbolic = LazyIntSymbolicStr(
                 SymbolicBoundedIntTuple(intervals.intervals, self._next_name("str"))
             )
+            if min_size > 0 and len(symbolic) < min_size:
+                raise IgnoreAttempt
+            if max_size is not None and len(symbolic) > max_size:
+                raise IgnoreAttempt
             self._remember_draw(symbolic)
             return symbolic
 
@@ -274,7 +280,10 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
         if is_tracing():
             return deep_realize(value)
         elif self._previous_realized_draws is None:
-            debug("WARNING: export_value() requested before test case completed", test_stack())
+            debug(
+                "WARNING: export_value() requested before test case completed",
+                test_stack(),
+            )
             return value
         elif id(value) in self._previous_realized_draws:
             return self._previous_realized_draws[id(value)]

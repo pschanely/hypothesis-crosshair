@@ -1,3 +1,4 @@
+import math
 import re
 
 import pytest
@@ -23,6 +24,44 @@ def test_float():
 
     with pytest.raises(AssertionError, match=re.escape("assert 42.42 != 42.42")):
         hypothesis_test()
+
+
+def test_float_in_bounds():
+    @settings(backend="crosshair")
+    @given(st.floats(min_value=0.04, max_value=0.06))
+    def hypothesis_test(f: float):
+        assert f != 0.05
+
+    with pytest.raises(AssertionError, match=re.escape("assert 0.05 != 0.05")):
+        hypothesis_test()
+
+
+def test_float_out_of_bounds():
+    @settings(backend="crosshair")
+    @given(st.floats(min_value=0.03, max_value=0.04))
+    def hypothesis_test(f: float):
+        assert f != 0.05
+
+    hypothesis_test()
+
+
+def test_float_can_produce_nan():
+    @settings(backend="crosshair")
+    @given(st.floats(allow_nan=True))
+    def hypothesis_test(f: float):
+        assert not math.isnan(f)
+
+    with pytest.raises(AssertionError):  # , match=re.escape("assert 0.05 != 0.05")):
+        hypothesis_test()
+
+
+def test_string():
+    @settings(backend="crosshair")
+    @given(st.text(min_size=3, max_size=3))
+    def hypothesis_test(s: str):
+        assert isinstance(s, str) and len(s) == 3
+
+    hypothesis_test()
 
 
 def test_list():

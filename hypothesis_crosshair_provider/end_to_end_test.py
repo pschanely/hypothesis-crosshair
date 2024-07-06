@@ -98,3 +98,11 @@ def test_dict():
         AssertionError, match=re.escape("assert {42: 123} != {42: 123}")
     ):
         hypothesis_test()
+
+
+def test_date():
+    @settings(backend="crosshair")
+    @given(st.dates())
+    def f(d):
+        pass
+    f()

@@ -253,10 +253,11 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
             symbolic = LazyIntSymbolicStr(
                 SymbolicBoundedIntTuple(intervals.intervals, self._next_name("str"))
             )
-            if min_size > 0 and len(symbolic) < min_size:
-                raise IgnoreAttempt
-            if max_size is not None and len(symbolic) > max_size:
-                raise IgnoreAttempt
+        if min_size > 0 and len(symbolic) < min_size:
+            raise IgnoreAttempt
+        if max_size is not None and len(symbolic) > max_size:
+            raise IgnoreAttempt
+        with NoTracing():
             self._remember_draw(symbolic)
             return symbolic
 

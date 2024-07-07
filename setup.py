@@ -2,7 +2,7 @@ import setuptools
 
 setuptools.setup(
     name="hypothesis-crosshair",
-    version="0.0.6",
+    version="0.0.7",
     author="Phillip Schanely",
     author_email="pschanely+B9vk@gmail.com",
     packages=setuptools.find_packages(),

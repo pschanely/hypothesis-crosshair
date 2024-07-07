@@ -25,6 +25,8 @@ from hypothesis.internal.intervalsets import IntervalSet
 class CrossHairPrimitiveProvider(PrimitiveProvider):
     """An implementation of PrimitiveProvider based on CrossHair."""
 
+    avoid_realization = True
+
     def __init__(self, *_a, **_kw) -> None:
         self.iteration_number = 0
         self.current_exit_stack: Optional[ExitStack] = None
@@ -293,3 +295,6 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
 
     def post_test_case_hook(self, val):
         return self.export_value(val)
+
+    def realize(self, value):
+        return self.export_value(value)

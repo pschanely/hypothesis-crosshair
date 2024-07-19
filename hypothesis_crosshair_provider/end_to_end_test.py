@@ -4,6 +4,8 @@ import re
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
+from hypothesis.stateful import (RuleBasedStateMachine, rule,
+                                 run_state_machine_as_test)
 
 
 def test_int():
@@ -105,4 +107,20 @@ def test_date():
     @given(st.dates())
     def f(d):
         pass
+
     f()
+
+
+def test_bool_probabilities():
+    # Regression test for https://github.com/pschanely/hypothesis-crosshair/issues/18
+
+    @run_state_machine_as_test
+    @settings(backend="crosshair", deadline=None)
+    class IntListRules(RuleBasedStateMachine):
+        @rule()
+        def a(self):
+            pass
+
+        @rule()
+        def b(self):
+            pass

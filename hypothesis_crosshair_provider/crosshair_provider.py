@@ -156,7 +156,11 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
         with NoTracing():
             if forced is not None:
                 return forced
-
+        if p == 0.0:
+            return False
+        elif p == 1.0:
+            return True
+        with NoTracing():
             symbolic = proxy_for_type(
                 bool, self._next_name("bool"), allow_subtypes=False
             )

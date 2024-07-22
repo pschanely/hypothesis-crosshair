@@ -13,7 +13,8 @@ from crosshair.core import (COMPOSITE_TRACER, DEFAULT_OPTIONS,
                             StateSpaceContext, UnexploredPath,
                             VerificationStatus, condition_parser,
                             context_statespace, get_current_parser, is_tracing,
-                            proxy_for_type)
+                            proxy_for_type,
+                            suspected_proxy_intolerance_exception)
 from crosshair.libimpl.builtinslib import (LazyIntSymbolicStr,
                                            SymbolicBoundedIntTuple)
 from crosshair.statespace import DeatchedPathNode
@@ -129,6 +130,11 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                     raise exc
         except (IgnoreAttempt, UnexploredPath):
             pass
+        except TypeError as exc:
+            if suspected_proxy_intolerance_exception(exc):
+                pass
+            else:
+                raise
         finally:
             self._previous_space = space
             if any_choices_made:

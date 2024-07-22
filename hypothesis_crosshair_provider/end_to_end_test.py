@@ -1,4 +1,5 @@
 import math
+import os
 import re
 
 import pytest
@@ -124,3 +125,13 @@ def test_bool_probabilities():
         @rule()
         def b(self):
             pass
+
+
+def test_proxy_intolerance():
+    @settings(backend="crosshair")
+    @given(st.text())
+    def f(t):
+        # ideally we keep this up-to-date with some C function that will not accept symbolics:
+        os.fspath(t)
+
+    f()

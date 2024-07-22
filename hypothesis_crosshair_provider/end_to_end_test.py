@@ -135,3 +135,13 @@ def test_proxy_intolerance():
         os.fspath(t)
 
     f()
+
+
+def test_datetimes_can_generate_in_few_iterations():
+    @given(st.datetimes())
+    @settings(backend="crosshair", deadline=None, max_examples=10)
+    def f(n):
+        raise Exception("generated one")
+
+    with pytest.raises(Exception, match="generated one"):
+        f()

@@ -17,7 +17,7 @@ from crosshair.core import (COMPOSITE_TRACER, DEFAULT_OPTIONS,
                             suspected_proxy_intolerance_exception)
 from crosshair.libimpl.builtinslib import (LazyIntSymbolicStr,
                                            SymbolicBoundedIntTuple)
-from crosshair.statespace import DeatchedPathNode
+from crosshair.statespace import DeatchedPathNode, prefer_true
 from crosshair.util import set_debug, test_stack
 from hypothesis.internal.conjecture.data import PrimitiveProvider
 from hypothesis.internal.intervalsets import IntervalSet
@@ -193,11 +193,12 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
             conditions.append(min_value <= symbolic)
         if max_value is not None:
             conditions.append(symbolic <= max_value)
-        if not all(conditions):
-            raise IgnoreAttempt
+        in_bounds = all(conditions)
         with NoTracing():
+            if not prefer_true(in_bounds):
+                raise IgnoreAttempt
             self._remember_draw(symbolic)
-        return symbolic
+            return symbolic
 
     def draw_float(
         self,

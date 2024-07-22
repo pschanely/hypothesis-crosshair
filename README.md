@@ -51,3 +51,12 @@ And then run pytest using the profile you've defined:
 ```
 pytest . --hypothesis-profile=crosshair 
 ```
+
+
+## Changelog
+
+### 0.0.10
+* Reduce the numebr of iterations required to generate valid datetimes
+
+### 0.0.9
+* Quietly ignore iterations that appear to be failing due to symbolic intolerance.

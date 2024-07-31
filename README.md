@@ -55,6 +55,9 @@ pytest . --hypothesis-profile=crosshair
 
 ## Changelog
 
+### 0.0.11
+* Address errors when the solver can't keep up (fixes [#20](https://github.com/pschanely/hypothesis-crosshair/issues/20))
+
 ### 0.0.10
 * Reduce the numebr of iterations required to generate valid datetimes
 

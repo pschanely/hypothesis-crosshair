@@ -9,8 +9,8 @@ import crosshair.core_and_libs  # Needed for patch registrations
 from crosshair import debug, deep_realize
 from crosshair.core import (COMPOSITE_TRACER, DEFAULT_OPTIONS,
                             AnalysisOptionSet, CallAnalysis, IgnoreAttempt,
-                            NoTracing, Patched, RootNode, StateSpace,
-                            StateSpaceContext, UnexploredPath,
+                            NoTracing, Patched, ResumedTracing, RootNode,
+                            StateSpace, StateSpaceContext, UnexploredPath,
                             VerificationStatus, condition_parser,
                             context_statespace, get_current_parser, is_tracing,
                             proxy_for_type,
@@ -18,7 +18,7 @@ from crosshair.core import (COMPOSITE_TRACER, DEFAULT_OPTIONS,
 from crosshair.libimpl.builtinslib import (LazyIntSymbolicStr,
                                            SymbolicBoundedIntTuple)
 from crosshair.statespace import DeatchedPathNode, prefer_true
-from crosshair.util import set_debug, test_stack
+from crosshair.util import UnknownSatisfiability, set_debug, test_stack
 from hypothesis.internal.conjecture.data import PrimitiveProvider
 from hypothesis.internal.intervalsets import IntervalSet
 
@@ -32,12 +32,11 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
         self.iteration_number = 0
         self.current_exit_stack: Optional[ExitStack] = None
         self.search_root = RootNode()
-        if len(os.environ.get("DEBUG_CROSSHAIR", "")) > 1:
+        if len(os.environ.get("DEBUG_CROSSHAIR", "")) > 0:
             set_debug(os.environ["DEBUG_CROSSHAIR"].lower() not in ("0", "false"))
         elif "-vv" in sys.argv:
             set_debug(True)
         self._previous_space = None
-        self._previous_realized_draws = None
         self.exhausted = False
 
     @contextmanager
@@ -83,7 +82,6 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
             # might be nice to signal that we're done somehow.
             # But for now, just start over!
             self.search_root = RootNode()
-        self._previous_realized_draws = None
         self._previous_space = None
         space = self._make_statespace()
 
@@ -97,50 +95,33 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                 # Force removal of manually registered contracts:
                 get_current_parser().parsers[:] = []
 
+                debug("starting iteration", self.iteration_number)
                 try:
-                    debug("starting iteration", self.iteration_number)
-                    try:
-                        yield
-                    finally:
-                        any_choices_made = bool(space.choices_made)
-                        if any_choices_made:
-                            space.detach_path()
+                    yield
+                finally:
+                    with NoTracing():
+                        # Avoid timeout while post-processing:
+                        space.execution_deadline += 60
+                        self._previous_space = space
+                        if space.choices_made:
+                            with ResumedTracing():
+                                space.detach_path()
                         else:
                             # NOTE: I can't detach_path here because it will conflict with the
                             # top node of a prior "real" execution.
                             space._search_position = DeatchedPathNode().child
-                        self._previous_realized_draws = {
-                            id(symbolic): deep_realize(symbolic)
-                            for symbolic in space._hypothesis_draws
-                        }
-                    debug("ended iteration (normal completion)")
-                except Exception as exc:
-                    try:
-                        exc.args = deep_realize(exc.args)
-                        debug(
-                            f"ended iteration (exception: {type(exc).__name__}: {exc})",
-                            test_stack(exc.__traceback__),
-                        )
-                    except Exception:
-                        exc.args = ()
-                        debug(
-                            f"ended iteration ({type(exc)} exception)",
-                            test_stack(exc.__traceback__),
-                        )
-                    raise exc
+            debug("ended iteration (normal completion)")
         except (IgnoreAttempt, UnexploredPath):
-            pass
+            debug("ended iteration (ignored iteration)")
         except TypeError as exc:
             if suspected_proxy_intolerance_exception(exc):
-                pass
+                debug("ended iteration (ignored iteration)")
             else:
+                self.realize_exception(exc)
                 raise
-        finally:
-            self._previous_space = space
-            if any_choices_made:
-                debug("bubbling status")
-            else:
-                debug("no decisions made; ignoring this iteration")
+        except Exception as exc:
+            self.realize_exception(exc)
+            raise
 
     def _next_name(self, prefix: str) -> str:
         space = context_statespace()
@@ -291,22 +272,29 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
             return symbolic
 
     def export_value(self, value):
-        if is_tracing():
-            return deep_realize(value)
-        elif self._previous_realized_draws is None:
-            debug(
-                "WARNING: export_value() requested before test case completed",
-                test_stack(),
-            )
-            return value
-        elif id(value) in self._previous_realized_draws:
-            return self._previous_realized_draws[id(value)]
-        else:
-            with self.post_test_case_context_manager():
+        try:
+            if is_tracing():
                 return deep_realize(value)
+            else:
+                with self.post_test_case_context_manager():
+                    return deep_realize(value)
+        except UnknownSatisfiability:
+            if is_tracing():
+                typ = deep_realize(type(value))
+            else:
+                with self.post_test_case_context_manager():
+                    typ = deep_realize(type(value))
+            return typ()
 
     def post_test_case_hook(self, val):
         return self.export_value(val)
 
     def realize(self, value):
         return self.export_value(value)
+
+    def realize_exception(self, exc: Exception) -> None:
+        exc.args = self.export_value(exc.args)
+        debug(
+            f"ended iteration (exception: {type(exc).__name__}: {exc})",
+            test_stack(exc.__traceback__),
+        )

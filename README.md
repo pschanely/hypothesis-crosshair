@@ -55,6 +55,9 @@ pytest . --hypothesis-profile=crosshair
 
 ## Changelog
 
+### 0.0.12
+* Error early when trying to nest hypothesis tests. (which will otherwise put CrossHair into a bad state)
+
 ### 0.0.11
 * Address errors when the solver can't keep up (fixes [#20](https://github.com/pschanely/hypothesis-crosshair/issues/20))
 

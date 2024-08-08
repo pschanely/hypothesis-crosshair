@@ -18,7 +18,7 @@ from crosshair.core import (COMPOSITE_TRACER, DEFAULT_OPTIONS,
 from crosshair.libimpl.builtinslib import (LazyIntSymbolicStr,
                                            SymbolicBoundedIntTuple)
 from crosshair.statespace import DeatchedPathNode, prefer_true
-from crosshair.util import UnknownSatisfiability, set_debug, test_stack
+from crosshair.util import set_debug, test_stack
 from hypothesis.internal.conjecture.data import PrimitiveProvider
 from hypothesis.internal.intervalsets import IntervalSet
 
@@ -71,6 +71,9 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
 
     @contextmanager
     def per_test_case_context_manager(self):
+        if is_tracing():
+            raise BaseException("The CrossHair provider context is not reentrant")
+
         if self._previous_space is not None:
             _analysis, _exhausted = self._previous_space.bubble_status(
                 CallAnalysis(VerificationStatus.CONFIRMED)
@@ -278,7 +281,7 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
             else:
                 with self.post_test_case_context_manager():
                     return deep_realize(value)
-        except UnknownSatisfiability:
+        except UnexploredPath:  # test_lots_of_entropy_per_step
             if is_tracing():
                 typ = deep_realize(type(value))
             else:

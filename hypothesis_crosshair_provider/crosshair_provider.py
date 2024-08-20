@@ -1,9 +1,11 @@
 import math
 import os
+import re
 import sys
 from contextlib import ExitStack, contextmanager
+from io import StringIO
 from time import monotonic
-from typing import Optional, Sequence
+from typing import Any, Dict, Optional, Sequence
 
 import crosshair.core_and_libs  # Needed for patch registrations
 from crosshair import debug, deep_realize
@@ -18,9 +20,16 @@ from crosshair.core import (COMPOSITE_TRACER, DEFAULT_OPTIONS,
 from crosshair.libimpl.builtinslib import (LazyIntSymbolicStr,
                                            SymbolicBoundedIntTuple)
 from crosshair.statespace import DeatchedPathNode, prefer_true
-from crosshair.util import set_debug, test_stack
+from crosshair.util import set_debug
+try:
+    from crosshair.util import ch_stack
+except ImportError:
+    from crosshair.util import test_stack as ch_stack
 from hypothesis.internal.conjecture.data import PrimitiveProvider
 from hypothesis.internal.intervalsets import IntervalSet
+from hypothesis.internal.observability import TESTCASE_CALLBACKS
+
+_IMPORTANT_LOG_RE = re.compile(".*((?:SMT realized symbolic.*)|(?:SMT chose.*))$")
 
 
 class CrossHairPrimitiveProvider(PrimitiveProvider):
@@ -33,9 +42,12 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
         self.current_exit_stack: Optional[ExitStack] = None
         self.search_root = RootNode()
         if len(os.environ.get("DEBUG_CROSSHAIR", "")) > 0:
-            set_debug(os.environ["DEBUG_CROSSHAIR"].lower() not in ("0", "false"))
-        elif "-vv" in sys.argv:
-            set_debug(True)
+            self.debug_to_stderr = os.environ["DEBUG_CROSSHAIR"].lower() not in (
+                "0",
+                "false",
+            )
+        else:
+            self.debug_to_stderr = "-vv" in sys.argv
         self._previous_space = None
         self.exhausted = False
 
@@ -73,7 +85,11 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
     def per_test_case_context_manager(self):
         if is_tracing():
             raise BaseException("The CrossHair provider context is not reentrant")
-
+        if TESTCASE_CALLBACKS:
+            self.debug_buffer = StringIO()
+            set_debug(True, self.debug_buffer)
+        elif self.debug_to_stderr:
+            set_debug(True, sys.stderr)
         if self._previous_space is not None:
             _analysis, _exhausted = self._previous_space.bubble_status(
                 CallAnalysis(VerificationStatus.CONFIRMED)
@@ -113,17 +129,29 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                             # NOTE: I can't detach_path here because it will conflict with the
                             # top node of a prior "real" execution.
                             space._search_position = DeatchedPathNode().child
+            self.completion = "completed normally"
             debug("ended iteration (normal completion)")
-        except (IgnoreAttempt, UnexploredPath):
-            debug("ended iteration (ignored iteration)")
+        except (IgnoreAttempt, UnexploredPath) as exc:
+            exc_name = type(exc).__name__
+            debug(f"ended iteration ({exc_name})")
+            completion_text = {
+                "IgnoreAttempt": "lazily-detected path impossibility",
+                "UnknownSatisfiability": "excessive solver costs",
+                "CrosshairUnsupported": "use of Python features not yet supported by CrossHair",
+                "PathTimeout": "path timeout",
+            }.get(exc_name, exc_name)
+            self.completion = f"ignored due to {completion_text}"
         except TypeError as exc:
             if suspected_proxy_intolerance_exception(exc):
                 debug("ended iteration (ignored iteration)")
+                self.completion = f"ignored due to proxy intolerance"
             else:
                 self.realize_exception(exc)
+                self.completion = f"raised {type(exc).__name__} exception"
                 raise
         except Exception as exc:
             self.realize_exception(exc)
+            self.completion = f"raised {type(exc).__name__} exception"
             raise
 
     def _next_name(self, prefix: str) -> str:
@@ -299,5 +327,21 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
         exc.args = self.export_value(exc.args)
         debug(
             f"ended iteration (exception: {type(exc).__name__}: {exc})",
-            test_stack(exc.__traceback__),
+            ch_stack(exc.__traceback__),
         )
+
+    def observe_test_case(self) -> Dict[str, Any]:
+        """Called at the end of the test case when observability mode is active.
+        The return value should be a non-symbolic json-encodable dictionary,
+        and will be included as `observation["metadata"]["backend"]`.
+        """
+        if self.debug_buffer:
+            lines = self.debug_buffer.getvalue().split("\n")
+            messages = [
+                match.group(1) for match in map(_IMPORTANT_LOG_RE.match, lines) if match
+            ]
+            return {
+                "completion": self.completion,
+                "messages": messages,
+            }
+        return {}

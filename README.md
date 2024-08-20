@@ -55,6 +55,9 @@ pytest . --hypothesis-profile=crosshair
 
 ## Changelog
 
+### 0.0.13
+* Integrate with the hypothesis [observability system](https://hypothesis.readthedocs.io/en/latest/observability.html).
+
 ### 0.0.12
 * Error early when trying to nest hypothesis tests. (which will otherwise put CrossHair into a bad state)
 

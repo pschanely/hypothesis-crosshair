@@ -19,12 +19,16 @@ from crosshair.core import (COMPOSITE_TRACER, DEFAULT_OPTIONS,
                             suspected_proxy_intolerance_exception)
 from crosshair.libimpl.builtinslib import (LazyIntSymbolicStr,
                                            SymbolicBoundedIntTuple)
-from crosshair.statespace import DeatchedPathNode, prefer_true
+from crosshair.statespace import prefer_true
 from crosshair.util import set_debug
+
 try:
     from crosshair.util import ch_stack
 except ImportError:
     from crosshair.util import test_stack as ch_stack
+
+from hypothesis import settings
+from hypothesis.errors import BackendCannotProceed
 from hypothesis.internal.conjecture.data import PrimitiveProvider
 from hypothesis.internal.intervalsets import IntervalSet
 from hypothesis.internal.observability import TESTCASE_CALLBACKS
@@ -60,22 +64,20 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
             StateSpaceContext(self._previous_space),
             COMPOSITE_TRACER,
         ):
-            # IgnoreAttempt is possible here in theory, but hopefully won't happen because we've
-            # already fixed the drawn values
             yield
 
     def _make_statespace(self):
         options = DEFAULT_OPTIONS.overlay(AnalysisOptionSet(analysis_kind=[]))
+        # TODO: is this the right way to get current settings?:
+        hypothesis_deadline = settings().deadline
         per_path_timeout = (
-            2.0  # TODO: use hypothesis.settings.deadline * 10 or something?
+            hypothesis_deadline.total_seconds() * 2 if hypothesis_deadline else 10.0
         )
-        iter_start = monotonic()
         space = StateSpace(
-            execution_deadline=iter_start + per_path_timeout,
+            execution_deadline=monotonic() + per_path_timeout,
             model_check_timeout=per_path_timeout / 2,
             search_root=self.search_root,
         )
-        space._hypothesis_draws = []  # keep a log of drawn values
         space._hypothesis_next_name_id = (
             0  # something to uniqu-ify names for drawn values
         )
@@ -94,14 +96,12 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
             _analysis, _exhausted = self._previous_space.bubble_status(
                 CallAnalysis(VerificationStatus.CONFIRMED)
             )
+        self._previous_space = None
         self.iteration_number += 1
         if self.search_root.child.is_exhausted():
             self.exhausted = True
-            debug("Resetting search root")
-            # might be nice to signal that we're done somehow.
-            # But for now, just start over!
-            self.search_root = RootNode()
-        self._previous_space = None
+            self.completion = "exhausted all paths - nothing else to do"
+            raise BackendCannotProceed("verified")
         space = self._make_statespace()
 
         try:
@@ -119,16 +119,9 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                     yield
                 finally:
                     with NoTracing():
-                        # Avoid timeout while post-processing:
-                        space.execution_deadline += 60
                         self._previous_space = space
-                        if space.choices_made:
-                            with ResumedTracing():
-                                space.detach_path()
-                        else:
-                            # NOTE: I can't detach_path here because it will conflict with the
-                            # top node of a prior "real" execution.
-                            space._search_position = DeatchedPathNode().child
+                        with ResumedTracing():
+                            space.detach_path()
             self.completion = "completed normally"
             debug("ended iteration (normal completion)")
         except (IgnoreAttempt, UnexploredPath) as exc:
@@ -141,10 +134,12 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                 "PathTimeout": "path timeout",
             }.get(exc_name, exc_name)
             self.completion = f"ignored due to {completion_text}"
+            raise BackendCannotProceed("not_realizable") from exc
         except TypeError as exc:
             if suspected_proxy_intolerance_exception(exc):
                 debug("ended iteration (ignored iteration)")
                 self.completion = f"ignored due to proxy intolerance"
+                raise BackendCannotProceed("not_realizable")
             else:
                 self.realize_exception(exc)
                 self.completion = f"raised {type(exc).__name__} exception"
@@ -156,13 +151,11 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
 
     def _next_name(self, prefix: str) -> str:
         space = context_statespace()
+        space.check_timeout()
         space._hypothesis_next_name_id += 1
         name = f"{prefix}_{space._hypothesis_next_name_id:02d}"
         debug("Drawing", name)
         return name
-
-    def _remember_draw(self, symbolic):
-        context_statespace()._hypothesis_draws.append(symbolic)
 
     def draw_boolean(
         self,
@@ -179,11 +172,7 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
         elif p == 1.0:
             return True
         with NoTracing():
-            symbolic = proxy_for_type(
-                bool, self._next_name("bool"), allow_subtypes=False
-            )
-            self._remember_draw(symbolic)
-            return symbolic
+            return proxy_for_type(bool, self._next_name("bool"), allow_subtypes=False)
 
     def draw_integer(
         self,
@@ -209,7 +198,6 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
         with NoTracing():
             if not prefer_true(in_bounds):
                 raise IgnoreAttempt
-            self._remember_draw(symbolic)
             return symbolic
 
     def draw_float(
@@ -256,8 +244,6 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                 )
             if not all(conditions):
                 raise IgnoreAttempt
-        with NoTracing():
-            self._remember_draw(symbolic)
         return symbolic
 
     def draw_string(
@@ -280,9 +266,7 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
             raise IgnoreAttempt
         if max_size is not None and len(symbolic) > max_size:
             raise IgnoreAttempt
-        with NoTracing():
-            self._remember_draw(symbolic)
-            return symbolic
+        return symbolic
 
     def draw_bytes(
         self,
@@ -298,9 +282,7 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
             )
         if len(symbolic) != size:
             raise IgnoreAttempt
-        with NoTracing():
-            self._remember_draw(symbolic)
-            return symbolic
+        return symbolic
 
     def export_value(self, value):
         try:
@@ -309,13 +291,8 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
             else:
                 with self.post_test_case_context_manager():
                     return deep_realize(value)
-        except UnexploredPath:  # test_lots_of_entropy_per_step
-            if is_tracing():
-                typ = deep_realize(type(value))
-            else:
-                with self.post_test_case_context_manager():
-                    typ = deep_realize(type(value))
-            return typ()
+        except (IgnoreAttempt, UnexploredPath):  # test_lots_of_entropy_per_step
+            raise BackendCannotProceed
 
     def post_test_case_hook(self, val):
         return self.export_value(val)

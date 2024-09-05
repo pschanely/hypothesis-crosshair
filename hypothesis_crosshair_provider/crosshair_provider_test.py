@@ -31,7 +31,7 @@ def test_end_to_end():
                 s_str = provider.draw_string(
                     IntervalSet.from_string("abcdefghijklmnopqrstuvwxyz")
                 )
-                s_bytes = provider.draw_bytes(1)
+                s_bytes = provider.draw_bytes(1, 1)
                 assert type(s_bool) == bool
                 assert type(s_int) == int
                 assert type(s_float) == float

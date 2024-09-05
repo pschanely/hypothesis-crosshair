@@ -55,6 +55,9 @@ pytest . --hypothesis-profile=crosshair
 
 ## Changelog
 
+### 0.0.14
+* Support the revised hypothesis provider draw interfaces as of hypothesis `v6.112.0`.
+
 ### 0.0.13
 * Integrate with the hypothesis [observability system](https://hypothesis.readthedocs.io/en/latest/observability.html).
 

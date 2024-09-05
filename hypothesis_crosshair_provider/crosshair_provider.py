@@ -21,10 +21,12 @@ from crosshair.libimpl.builtinslib import (LazyIntSymbolicStr,
                                            SymbolicBoundedIntTuple)
 from crosshair.statespace import DeatchedPathNode, prefer_true
 from crosshair.util import set_debug
+
 try:
     from crosshair.util import ch_stack
 except ImportError:
     from crosshair.util import test_stack as ch_stack
+
 from hypothesis.internal.conjecture.data import PrimitiveProvider
 from hypothesis.internal.intervalsets import IntervalSet
 from hypothesis.internal.observability import TESTCASE_CALLBACKS
@@ -286,7 +288,9 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
 
     def draw_bytes(
         self,
-        size: int,
+        min_size: int = 0,
+        max_size: int = math.inf,
+        *,
         forced: Optional[bytes] = None,
         fake_forced: bool = False,
     ) -> bytes:
@@ -296,7 +300,8 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
             symbolic = proxy_for_type(
                 bytes, self._next_name("bytes"), allow_subtypes=False
             )
-        if len(symbolic) != size:
+        mylen = len(symbolic)
+        if any([mylen < min_size, max_size < mylen]):
             raise IgnoreAttempt
         with NoTracing():
             self._remember_draw(symbolic)

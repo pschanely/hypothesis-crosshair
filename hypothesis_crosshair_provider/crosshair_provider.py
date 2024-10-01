@@ -256,11 +256,13 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                         ]
                     )
                 )
-            if not all(conditions):
-                raise IgnoreAttempt
+            all_conditions_true = all(conditions)
+            with NoTracing():
+                if not prefer_true(all_conditions_true):
+                    raise IgnoreAttempt
         with NoTracing():
             self._remember_draw(symbolic)
-        return symbolic
+            return symbolic
 
     def draw_string(
         self,
@@ -278,11 +280,15 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
             symbolic = LazyIntSymbolicStr(
                 SymbolicBoundedIntTuple(intervals.intervals, self._next_name("str"))
             )
-        if min_size > 0 and len(symbolic) < min_size:
-            raise IgnoreAttempt
-        if max_size is not None and len(symbolic) > max_size:
-            raise IgnoreAttempt
+        conditions = []
+        if min_size > 0:
+            conditions.append(len(symbolic) >= min_size)
+        if max_size is not None:
+            conditions.append(len(symbolic) <= max_size)
+        all_conditions_true = all(conditions)
         with NoTracing():
+            if not prefer_true(all_conditions_true):
+                raise IgnoreAttempt
             self._remember_draw(symbolic)
             return symbolic
 

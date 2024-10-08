@@ -55,6 +55,12 @@ pytest . --hypothesis-profile=crosshair
 
 ## Changelog
 
+### 0.0.15
+* Allow for collapsing more SMT expressions when drawing strings and floats.
+* Validate suspected counterexamples with concrete executions.
+* Ensure realization logic called by hypothesis cannot grow the path tree.
+* Treat nondeterminism as an unexplored path rather than a user error. (though we might change this back later)
+
 ### 0.0.14
 * Support the revised hypothesis provider draw interfaces as of hypothesis `v6.112.0`.
 

@@ -56,6 +56,7 @@ def test_post_run_value_export():
         s_int = provider.draw_integer()
         if s_int > 10:
             pass
+    assert provider.completion == "completed normally"
     assert type(provider.export_value(s_int)) is int
     assert type(provider.export_value([s_int])[0]) is int
 
@@ -72,8 +73,24 @@ def test_post_run_decisions_do_not_grow_the_search_tree():
             if s_int + 1 > 100:
                 pass
         assert not provider.exhausted
-    with provider.per_test_case_context_manager():
-        assert provider.exhausted
+        assert provider.completion == "completed normally"
+    provider.bubble_status()
+    assert provider.exhausted
+
+
+def test_export_mid_run_does_not_grow_the_search_tree():
+    provider = CrossHairPrimitiveProvider()
+    # There should only be one real branch; so it will take 2 iterations to exhaust
+    for _ in range(2):
+        with provider.per_test_case_context_manager():
+            s_int = provider.draw_integer()
+            if s_int > 10:
+                pass
+            provider.export_value(s_int)
+        assert not provider.exhausted
+        assert provider.completion == "completed normally"
+    provider.bubble_status()
+    assert provider.exhausted
 
 
 def test_value_export_with_no_decisions():

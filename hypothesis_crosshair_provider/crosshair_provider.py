@@ -65,6 +65,7 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
             StateSpaceContext(self._previous_space),
             COMPOSITE_TRACER,
         ):
+            self._previous_space.detach_path()
             # IgnoreAttempt is possible here in theory, but hopefully won't happen because we've
             # already fixed the drawn values
             yield
@@ -151,10 +152,11 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                         self._previous_space = space
                         if space.choices_made:
                             with ResumedTracing():
-                                space.detach_path()
+                                space.detach_path(currently_handling=sys.exc_info()[1])
                         else:
                             # NOTE: I can't detach_path here because it will conflict with the
                             # top node of a prior "real" execution.
+                            # TODO: remove when we can signal to hypothesis to stop
                             space._search_position = DeatchedPathNode().child
             self.completion = "completed normally"
             debug("ended iteration (normal completion)")
@@ -354,6 +356,9 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
     def export_value(self, value):
         try:
             if is_tracing():
+                # hypothesis is handling an exception; sever the path tree:
+                space = context_statespace()
+                space.detach_path()
                 return deep_realize(value)
             else:
                 with self.post_test_case_context_manager():

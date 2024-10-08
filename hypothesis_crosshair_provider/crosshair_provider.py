@@ -5,7 +5,7 @@ import sys
 from contextlib import ExitStack, contextmanager
 from io import StringIO
 from time import monotonic
-from typing import Any, Dict, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence
 
 import crosshair.core_and_libs  # Needed for patch registrations
 from crosshair import debug, deep_realize
@@ -52,10 +52,13 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
             self.debug_to_stderr = "-vv" in sys.argv
         self._previous_space = None
         self.exhausted = False
+        self.doublecheck_inputs: Optional[List] = None
 
     @contextmanager
     def post_test_case_context_manager(self):
-        assert self._previous_space is not None
+        if self._previous_space is None:
+            yield
+            return
         with (
             condition_parser([]),
             Patched(),
@@ -77,11 +80,26 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
             model_check_timeout=per_path_timeout / 2,
             search_root=self.search_root,
         )
-        space._hypothesis_draws = []  # keep a log of drawn values
         space._hypothesis_next_name_id = (
             0  # something to uniqu-ify names for drawn values
         )
         return space
+
+    def _replayed_draw(self, expected_type):
+        if self.doublecheck_inputs:
+            value = self.doublecheck_inputs.pop()
+            if isinstance(value, expected_type):
+                return value
+        raise IgnoreAttempt
+
+    def bubble_status(self):
+        if self._previous_space is not None:
+            _analysis, _exhausted = self._previous_space.bubble_status(
+                CallAnalysis(VerificationStatus.CONFIRMED)
+            )
+            if self.search_root.child.is_exhausted():
+                self.exhausted = True
+        self._previous_space = None
 
     @contextmanager
     def per_test_case_context_manager(self):
@@ -92,18 +110,26 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
             set_debug(True, self.debug_buffer)
         elif self.debug_to_stderr:
             set_debug(True, sys.stderr)
-        if self._previous_space is not None:
-            _analysis, _exhausted = self._previous_space.bubble_status(
-                CallAnalysis(VerificationStatus.CONFIRMED)
-            )
+        self.bubble_status()
         self.iteration_number += 1
-        if self.search_root.child.is_exhausted():
-            self.exhausted = True
+        debug("starting iteration", self.iteration_number)
+        self._hypothesis_draws = []  # keep a log of drawn values
+        if self.doublecheck_inputs is not None:
+            debug("Replaying a (concrete) version of the prior iteration.")
+            try:
+                yield
+                debug("Finished concrete replay, but did not encounter an exception!")
+                return
+            except BaseException as exc:
+                debug("Finished concrete replay with exception:", type(exc), exc)
+                raise
+            finally:
+                self.doublecheck_inputs = None
+        if self.exhausted:
             debug("Resetting search root")
             # might be nice to signal that we're done somehow.
             # But for now, just start over!
             self.search_root = RootNode()
-        self._previous_space = None
         space = self._make_statespace()
 
         try:
@@ -116,7 +142,6 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                 # Force removal of manually registered contracts:
                 get_current_parser().parsers[:] = []
 
-                debug("starting iteration", self.iteration_number)
                 try:
                     yield
                 finally:
@@ -148,13 +173,9 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                 debug("ended iteration (ignored iteration)")
                 self.completion = f"ignored due to proxy intolerance"
             else:
-                self.realize_exception(exc)
-                self.completion = f"raised {type(exc).__name__} exception"
-                raise
+                self.handle_user_exception(exc)
         except Exception as exc:
-            self.realize_exception(exc)
-            self.completion = f"raised {type(exc).__name__} exception"
-            raise
+            self.handle_user_exception(exc)
 
     def _next_name(self, prefix: str) -> str:
         space = context_statespace()
@@ -164,7 +185,7 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
         return name
 
     def _remember_draw(self, symbolic):
-        context_statespace()._hypothesis_draws.append(symbolic)
+        self._hypothesis_draws.append(symbolic)
 
     def draw_boolean(
         self,
@@ -181,9 +202,12 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
         elif p == 1.0:
             return True
         with NoTracing():
-            symbolic = proxy_for_type(
-                bool, self._next_name("bool"), allow_subtypes=False
-            )
+            if self.doublecheck_inputs is None:
+                symbolic = proxy_for_type(
+                    bool, self._next_name("bool"), allow_subtypes=False
+                )
+            else:
+                symbolic = self._replayed_draw(bool)
             self._remember_draw(symbolic)
             return symbolic
 
@@ -201,7 +225,12 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
         with NoTracing():
             if forced is not None:
                 return forced
-            symbolic = proxy_for_type(int, self._next_name("int"), allow_subtypes=False)
+            if self.doublecheck_inputs is None:
+                symbolic = proxy_for_type(
+                    int, self._next_name("int"), allow_subtypes=False
+                )
+            else:
+                symbolic = self._replayed_draw(int)
         conditions = []
         if min_value is not None:
             conditions.append(min_value <= symbolic)
@@ -234,9 +263,12 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
         with NoTracing():
             if forced is not None:
                 return forced
-            symbolic = proxy_for_type(
-                float, self._next_name("float"), allow_subtypes=False
-            )
+            if self.doublecheck_inputs is None:
+                symbolic = proxy_for_type(
+                    float, self._next_name("float"), allow_subtypes=False
+                )
+            else:
+                symbolic = self._replayed_draw(float)
         if math.isnan(symbolic):
             if not allow_nan:
                 raise IgnoreAttempt
@@ -277,9 +309,12 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
             if forced is not None:
                 return forced
             assert isinstance(intervals, IntervalSet)
-            symbolic = LazyIntSymbolicStr(
-                SymbolicBoundedIntTuple(intervals.intervals, self._next_name("str"))
-            )
+            if self.doublecheck_inputs is None:
+                symbolic = LazyIntSymbolicStr(
+                    SymbolicBoundedIntTuple(intervals.intervals, self._next_name("str"))
+                )
+            else:
+                symbolic = self._replayed_draw(str)
         conditions = []
         if min_size > 0:
             conditions.append(len(symbolic) >= min_size)
@@ -303,9 +338,12 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
         with NoTracing():
             if forced is not None:
                 return forced
-            symbolic = proxy_for_type(
-                bytes, self._next_name("bytes"), allow_subtypes=False
-            )
+            if self.doublecheck_inputs is None:
+                symbolic = proxy_for_type(
+                    bytes, self._next_name("bytes"), allow_subtypes=False
+                )
+            else:
+                symbolic = self._replayed_draw(bytes)
         mylen = len(symbolic)
         if any([mylen < min_size, max_size < mylen]):
             raise IgnoreAttempt
@@ -334,12 +372,19 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
     def realize(self, value):
         return self.export_value(value)
 
-    def realize_exception(self, exc: Exception) -> None:
-        exc.args = self.export_value(exc.args)
-        debug(
-            f"ended iteration (exception: {type(exc).__name__}: {exc})",
-            ch_stack(exc.__traceback__),
-        )
+    def handle_user_exception(self, exc: Exception) -> None:
+        with self.post_test_case_context_manager():
+            with NoTracing():
+                exc.args = deep_realize(exc.args)
+                debug(
+                    f"ended iteration (exception: {type(exc).__name__}: {exc})",
+                    ch_stack(exc.__traceback__),
+                )
+                self.completion = f"raised {type(exc).__name__} exception"
+                self.doublecheck_inputs = list(
+                    map(deep_realize, self._hypothesis_draws)
+                )
+                self.doublecheck_inputs.reverse()
 
     def observe_test_case(self) -> Dict[str, Any]:
         """Called at the end of the test case when observability mode is active.

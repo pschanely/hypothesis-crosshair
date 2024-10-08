@@ -20,7 +20,7 @@ from crosshair.core import (COMPOSITE_TRACER, DEFAULT_OPTIONS,
 from crosshair.libimpl.builtinslib import (LazyIntSymbolicStr,
                                            SymbolicBoundedIntTuple)
 from crosshair.statespace import DeatchedPathNode, prefer_true
-from crosshair.util import set_debug
+from crosshair.util import NotDeterministic, set_debug
 
 try:
     from crosshair.util import ch_stack
@@ -160,7 +160,7 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                             space._search_position = DeatchedPathNode().child
             self.completion = "completed normally"
             debug("ended iteration (normal completion)")
-        except (IgnoreAttempt, UnexploredPath) as exc:
+        except (IgnoreAttempt, UnexploredPath, NotDeterministic) as exc:
             exc_name = type(exc).__name__
             debug(f"ended iteration ({exc_name})")
             completion_text = {
@@ -168,6 +168,7 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                 "UnknownSatisfiability": "excessive solver costs",
                 "CrosshairUnsupported": "use of Python features not yet supported by CrossHair",
                 "PathTimeout": "path timeout",
+                "NotDeterministic": "non determinism detected",
             }.get(exc_name, exc_name)
             self.completion = f"ignored due to {completion_text}"
         except TypeError as exc:

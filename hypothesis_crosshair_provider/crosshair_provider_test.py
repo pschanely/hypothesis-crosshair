@@ -1,9 +1,9 @@
 import types
 
+from hypothesis.errors import BackendCannotProceed
 from hypothesis.internal.intervalsets import IntervalSet
 
-from hypothesis_crosshair_provider.crosshair_provider import \
-    CrossHairPrimitiveProvider
+from hypothesis_crosshair_provider.crosshair_provider import CrossHairPrimitiveProvider
 
 
 class TargetException(Exception):
@@ -19,7 +19,7 @@ def _example_user_code(s_bool, s_int, s_float, s_str, s_bytes):
                         raise TargetException
 
 
-def test_end_to_end():
+def test_basic_loop():
     provider = CrossHairPrimitiveProvider()
     found_ct = 0
     for _ in range(30):
@@ -38,6 +38,7 @@ def test_end_to_end():
                 assert type(s_str) == str
                 assert type(s_bytes) == bytes
                 _example_user_code(s_bool, s_int, s_float, s_str, s_bytes)
+            # assert provider.completion == "completed normally"
             assert type(provider.export_value(s_bool)) == bool
             assert type(provider.export_value(s_int)) == int
             assert type(provider.export_value(s_float)) == float
@@ -45,6 +46,8 @@ def test_end_to_end():
             # NOTE: draw_bytes can raise IgnoreAttempt, which will leave the bytes
             # symbolic without a concrete value:
             assert type(provider.export_value(s_bytes)) in (bytes, types.NoneType)
+        except BackendCannotProceed:
+            pass
         except TargetException:
             found_ct += 1
     assert found_ct > 0, "CrossHair could not find the exception"

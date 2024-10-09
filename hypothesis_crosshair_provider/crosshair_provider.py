@@ -9,24 +9,32 @@ from typing import Any, Dict, List, Optional, Sequence
 
 import crosshair.core_and_libs  # Needed for patch registrations
 from crosshair import debug, deep_realize
-from crosshair.core import (COMPOSITE_TRACER, DEFAULT_OPTIONS,
-                            AnalysisOptionSet, CallAnalysis, IgnoreAttempt,
-                            NoTracing, Patched, ResumedTracing, RootNode,
-                            StateSpace, StateSpaceContext, UnexploredPath,
-                            VerificationStatus, condition_parser,
-                            context_statespace, get_current_parser, is_tracing,
-                            proxy_for_type,
-                            suspected_proxy_intolerance_exception)
-from crosshair.libimpl.builtinslib import (LazyIntSymbolicStr,
-                                           SymbolicBoundedIntTuple)
-from crosshair.statespace import DeatchedPathNode, prefer_true
-from crosshair.util import NotDeterministic, set_debug
-
-try:
-    from crosshair.util import ch_stack
-except ImportError:
-    from crosshair.util import test_stack as ch_stack
-
+from crosshair.core import (
+    COMPOSITE_TRACER,
+    DEFAULT_OPTIONS,
+    AnalysisOptionSet,
+    CallAnalysis,
+    IgnoreAttempt,
+    NoTracing,
+    Patched,
+    ResumedTracing,
+    RootNode,
+    StateSpace,
+    StateSpaceContext,
+    UnexploredPath,
+    VerificationStatus,
+    condition_parser,
+    context_statespace,
+    get_current_parser,
+    is_tracing,
+    proxy_for_type,
+    suspected_proxy_intolerance_exception,
+)
+from crosshair.libimpl.builtinslib import LazyIntSymbolicStr, SymbolicBoundedIntTuple
+from crosshair.statespace import prefer_true
+from crosshair.util import CrossHairInternal, NotDeterministic, ch_stack, set_debug
+from hypothesis import settings
+from hypothesis.errors import BackendCannotProceed
 from hypothesis.internal.conjecture.data import PrimitiveProvider
 from hypothesis.internal.intervalsets import IntervalSet
 from hypothesis.internal.observability import TESTCASE_CALLBACKS
@@ -66,18 +74,15 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
             COMPOSITE_TRACER,
         ):
             self._previous_space.detach_path()
-            # IgnoreAttempt is possible here in theory, but hopefully won't happen because we've
-            # already fixed the drawn values
             yield
 
     def _make_statespace(self):
-        options = DEFAULT_OPTIONS.overlay(AnalysisOptionSet(analysis_kind=[]))
+        hypothesis_deadline = settings().deadline
         per_path_timeout = (
-            2.0  # TODO: use hypothesis.settings.deadline * 10 or something?
+            hypothesis_deadline.total_seconds() * 2 if hypothesis_deadline else 10.0
         )
-        iter_start = monotonic()
         space = StateSpace(
-            execution_deadline=iter_start + per_path_timeout,
+            execution_deadline=monotonic() + per_path_timeout,
             model_check_timeout=per_path_timeout / 2,
             search_root=self.search_root,
         )
@@ -87,11 +92,27 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
         return space
 
     def _replayed_draw(self, expected_type):
-        if self.doublecheck_inputs:
-            value = self.doublecheck_inputs.pop()
-            if isinstance(value, expected_type):
-                return value
-        raise IgnoreAttempt
+        if not self.doublecheck_inputs:
+            if self.doublecheck_inputs is None:
+                raise CrossHairInternal
+            debug(
+                "Inconsistent behavior on concrete replay:",
+                "first run has exhausted its inputs, but a value of type",
+                expected_type,
+                "was requested",
+            )
+            raise BackendCannotProceed("verified")
+        value = self.doublecheck_inputs.pop()
+        if isinstance(value, expected_type):
+            return value
+        debug(
+            "Inconsistent behavior on concrete replay:",
+            type(value),
+            "found from first run, but",
+            expected_type,
+            "was requested",
+        )
+        raise BackendCannotProceed("verified")
 
     def bubble_status(self):
         if self._previous_space is not None:
@@ -127,10 +148,8 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
             finally:
                 self.doublecheck_inputs = None
         if self.exhausted:
-            debug("Resetting search root")
-            # might be nice to signal that we're done somehow.
-            # But for now, just start over!
-            self.search_root = RootNode()
+            self.completion = "exhausted all paths - nothing else to do"
+            raise BackendCannotProceed("verified")
         space = self._make_statespace()
 
         try:
@@ -147,17 +166,13 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                     yield
                 finally:
                     with NoTracing():
-                        # Avoid timeout while post-processing:
-                        space.execution_deadline += 60
                         self._previous_space = space
-                        if space.choices_made:
+                        current_exc = sys.exc_info()[1]
+                        if not isinstance(
+                            current_exc, (BackendCannotProceed, UnexploredPath)
+                        ):
                             with ResumedTracing():
-                                space.detach_path(currently_handling=sys.exc_info()[1])
-                        else:
-                            # NOTE: I can't detach_path here because it will conflict with the
-                            # top node of a prior "real" execution.
-                            # TODO: remove when we can signal to hypothesis to stop
-                            space._search_position = DeatchedPathNode().child
+                                space.detach_path(currently_handling=current_exc)
             self.completion = "completed normally"
             debug("ended iteration (normal completion)")
         except (IgnoreAttempt, UnexploredPath, NotDeterministic) as exc:
@@ -171,10 +186,12 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                 "NotDeterministic": "non determinism detected",
             }.get(exc_name, exc_name)
             self.completion = f"ignored due to {completion_text}"
+            raise BackendCannotProceed("verified") from exc
         except TypeError as exc:
             if suspected_proxy_intolerance_exception(exc):
                 debug("ended iteration (ignored iteration)")
                 self.completion = f"ignored due to proxy intolerance"
+                raise BackendCannotProceed("verified")
             else:
                 self.handle_user_exception(exc)
         except Exception as exc:
@@ -182,6 +199,7 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
 
     def _next_name(self, prefix: str) -> str:
         space = context_statespace()
+        space.check_timeout()
         space._hypothesis_next_name_id += 1
         name = f"{prefix}_{space._hypothesis_next_name_id:02d}"
         debug("Drawing", name)
@@ -348,11 +366,13 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
             else:
                 symbolic = self._replayed_draw(bytes)
         mylen = len(symbolic)
-        if any([mylen < min_size, max_size < mylen]):
-            raise IgnoreAttempt
+        all_conditions = all([min_size <= mylen, mylen <= max_size])
         with NoTracing():
-            self._remember_draw(symbolic)
-            return symbolic
+            if prefer_true(all_conditions):
+                self._remember_draw(symbolic)
+                return symbolic
+            else:
+                raise IgnoreAttempt
 
     def export_value(self, value):
         try:
@@ -364,13 +384,8 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
             else:
                 with self.post_test_case_context_manager():
                     return deep_realize(value)
-        except UnexploredPath:  # test_lots_of_entropy_per_step
-            if is_tracing():
-                typ = deep_realize(type(value))
-            else:
-                with self.post_test_case_context_manager():
-                    typ = deep_realize(type(value))
-            return typ()
+        except (IgnoreAttempt, UnexploredPath):
+            raise BackendCannotProceed("discard_test_case")
 
     def post_test_case_hook(self, val):
         return self.export_value(val)
@@ -384,7 +399,7 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                 exc.args = deep_realize(exc.args)
                 debug(
                     f"ended iteration (exception: {type(exc).__name__}: {exc})",
-                    ch_stack(exc.__traceback__),
+                    ch_stack(currently_handling=exc),
                 )
                 self.completion = f"raised {type(exc).__name__} exception"
                 self.doublecheck_inputs = list(

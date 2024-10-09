@@ -5,8 +5,7 @@ import re
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from hypothesis.stateful import (RuleBasedStateMachine, rule,
-                                 run_state_machine_as_test)
+from hypothesis.stateful import RuleBasedStateMachine, rule, run_state_machine_as_test
 
 
 def test_int():

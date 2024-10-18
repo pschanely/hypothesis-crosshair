@@ -11,8 +11,6 @@ import crosshair.core_and_libs  # Needed for patch registrations
 from crosshair import debug, deep_realize
 from crosshair.core import (
     COMPOSITE_TRACER,
-    DEFAULT_OPTIONS,
-    AnalysisOptionSet,
     CallAnalysis,
     IgnoreAttempt,
     NoTracing,
@@ -40,6 +38,10 @@ from hypothesis.internal.intervalsets import IntervalSet
 from hypothesis.internal.observability import TESTCASE_CALLBACKS
 
 _IMPORTANT_LOG_RE = re.compile(".*((?:SMT realized symbolic.*)|(?:SMT chose.*))$")
+
+
+def is_negative(x):
+    return math.copysign(1, x) == -1
 
 
 class CrossHairPrimitiveProvider(PrimitiveProvider):
@@ -304,8 +306,12 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
             conditions = []
             if min_value is not None:
                 conditions.append(min_value <= symbolic)
+                if min_value == 0.0 and not is_negative(min_value):
+                    conditions.append(not is_negative(symbolic))
             if max_value is not None:
                 conditions.append(symbolic <= max_value)
+                if max_value == 0.0 and is_negative(max_value):
+                    conditions.append(is_negative(symbolic))
             if smallest_nonzero_magnitude:
                 conditions.append(
                     any(

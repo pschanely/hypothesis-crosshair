@@ -55,6 +55,9 @@ pytest . --hypothesis-profile=crosshair
 
 ## Changelog
 
+### 0.0.18
+* Ensure drawn floats respect hypothesis signed-zero semantics for min_value/max_value.
+
 ### 0.0.17
 * Do not interpret Unsatisfiable errors as user exceptions; just re-throw, so that hypothesis can act appropriately.
 * Report CrossHair path abortions to hypothesis as `discard_test_case` instead of `verified`.

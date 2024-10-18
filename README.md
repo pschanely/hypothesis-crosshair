@@ -55,17 +55,20 @@ pytest . --hypothesis-profile=crosshair
 
 ## Changelog
 
-### 0.0.16
+### 0.0.17
 * Do not interpret Unsatisfiable errors as user exceptions; just re-throw, so that hypothesis can act appropriately.
 * Report CrossHair path abortions to hypothesis as `discard_test_case` instead of `verified`.
   This lets Hypothesis report unsatisfiable strategies correctly when run under crosshair.
 
-### 0.0.15
+### 0.0.16
 * Integrate hypothesis's new BackCannotProceed exception, which will reduce the likelihood of FlakeyReplay errors.
 * Validate suspected counterexamples with concrete executions.
 * Treat nondeterminism as an unexplored path rather than a user error. (though we might change this back later)
 * Ensure realization logic called by hypothesis cannot grow the path tree.
 * Allow for collapsing more SMT expressions when drawing strings and floats.
+
+### 0.0.15
+* (was never released)
 
 ### 0.0.14
 * Support the revised hypothesis provider draw interfaces as of hypothesis `v6.112.0`.

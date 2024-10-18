@@ -34,7 +34,7 @@ from crosshair.libimpl.builtinslib import LazyIntSymbolicStr, SymbolicBoundedInt
 from crosshair.statespace import prefer_true
 from crosshair.util import CrossHairInternal, NotDeterministic, ch_stack, set_debug
 from hypothesis import settings
-from hypothesis.errors import BackendCannotProceed
+from hypothesis.errors import BackendCannotProceed, HypothesisException
 from hypothesis.internal.conjecture.data import PrimitiveProvider
 from hypothesis.internal.intervalsets import IntervalSet
 from hypothesis.internal.observability import TESTCASE_CALLBACKS
@@ -123,6 +123,10 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                 self.exhausted = True
         self._previous_space = None
 
+    def set_completion(self, msg: str):
+        debug("completion:", msg)
+        self.completion = msg
+
     @contextmanager
     def per_test_case_context_manager(self):
         if is_tracing():
@@ -148,7 +152,7 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
             finally:
                 self.doublecheck_inputs = None
         if self.exhausted:
-            self.completion = "exhausted all paths - nothing else to do"
+            self.set_completion("exhausted all paths - nothing else to do")
             raise BackendCannotProceed("verified")
         space = self._make_statespace()
 
@@ -173,7 +177,7 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                         ):
                             with ResumedTracing():
                                 space.detach_path(currently_handling=current_exc)
-            self.completion = "completed normally"
+            self.set_completion("completed normally")
             debug("ended iteration (normal completion)")
         except (IgnoreAttempt, UnexploredPath, NotDeterministic) as exc:
             exc_name = type(exc).__name__
@@ -185,15 +189,18 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                 "PathTimeout": "path timeout",
                 "NotDeterministic": "non determinism detected",
             }.get(exc_name, exc_name)
-            self.completion = f"ignored due to {completion_text}"
-            raise BackendCannotProceed("verified") from exc
+            self.set_completion(f"ignored due to {completion_text}")
+            raise BackendCannotProceed("discard_test_case") from exc
         except TypeError as exc:
             if suspected_proxy_intolerance_exception(exc):
                 debug("ended iteration (ignored iteration)")
-                self.completion = f"ignored due to proxy intolerance"
-                raise BackendCannotProceed("verified")
+                self.set_completion(f"ignored due to proxy intolerance")
+                raise BackendCannotProceed("discard_test_case")
             else:
                 self.handle_user_exception(exc)
+        except HypothesisException as exc:
+            self.set_completion(f"forwarded hypothesis {type(exc).__name__} exception")
+            raise
         except Exception as exc:
             self.handle_user_exception(exc)
 
@@ -401,7 +408,7 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                     f"ended iteration (exception: {type(exc).__name__}: {exc})",
                     ch_stack(currently_handling=exc),
                 )
-                self.completion = f"raised {type(exc).__name__} exception"
+                self.set_completion(f"raised {type(exc).__name__} exception")
                 self.doublecheck_inputs = list(
                     map(deep_realize, self._hypothesis_draws)
                 )

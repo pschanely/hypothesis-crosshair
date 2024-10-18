@@ -55,6 +55,11 @@ pytest . --hypothesis-profile=crosshair
 
 ## Changelog
 
+### 0.0.16
+* Do not interpret Unsatisfiable errors as user exceptions; just re-throw, so that hypothesis can act appropriately.
+* Report CrossHair path abortions to hypothesis as `discard_test_case` instead of `verified`.
+  This lets Hypothesis report unsatisfiable strategies correctly when run under crosshair.
+
 ### 0.0.15
 * Integrate hypothesis's new BackCannotProceed exception, which will reduce the likelihood of FlakeyReplay errors.
 * Validate suspected counterexamples with concrete executions.

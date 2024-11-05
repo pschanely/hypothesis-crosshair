@@ -32,7 +32,7 @@ from crosshair.libimpl.builtinslib import LazyIntSymbolicStr, SymbolicBoundedInt
 from crosshair.statespace import prefer_true
 from crosshair.util import CrossHairInternal, NotDeterministic, ch_stack, set_debug
 from hypothesis import settings
-from hypothesis.errors import BackendCannotProceed, HypothesisException
+from hypothesis.errors import BackendCannotProceed, Unsatisfiable
 from hypothesis.internal.conjecture.data import PrimitiveProvider
 from hypothesis.internal.intervalsets import IntervalSet
 from hypothesis.internal.observability import TESTCASE_CALLBACKS
@@ -200,8 +200,8 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                 raise BackendCannotProceed("discard_test_case")
             else:
                 self.handle_user_exception(exc)
-        except HypothesisException as exc:
-            self.set_completion(f"forwarded hypothesis {type(exc).__name__} exception")
+        except Unsatisfiable as exc:
+            self.set_completion(f"forwarded Unsatisfiable exception")
             raise
         except Exception as exc:
             self.handle_user_exception(exc)

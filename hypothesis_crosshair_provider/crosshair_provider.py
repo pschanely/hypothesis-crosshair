@@ -81,7 +81,7 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
     def _make_statespace(self):
         hypothesis_deadline = settings().deadline
         per_path_timeout = (
-            hypothesis_deadline.total_seconds() * 2 if hypothesis_deadline else 10.0
+            hypothesis_deadline.total_seconds() * 2 if hypothesis_deadline else 2.5
         )
         space = StateSpace(
             execution_deadline=monotonic() + per_path_timeout,

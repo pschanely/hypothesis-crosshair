@@ -143,7 +143,7 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
         debug("starting iteration", self.iteration_number)
         self._hypothesis_draws = []  # keep a log of drawn values
         if self.doublecheck_inputs is not None:
-            debug("Replaying a (concrete) version of the prior iteration.")
+            debug("Replaying a (concrete) version of the prior iteration. Draws: ", self.doublecheck_inputs)
             try:
                 yield
                 debug("Finished concrete replay, but did not encounter an exception!")

@@ -55,6 +55,11 @@ pytest . --hypothesis-profile=crosshair
 
 ## Changelog
 
+### Next Version
+* Limit the re-thow behavior in 0.0.17 to Unsatisfiable errors exclusively
+* Change default path timeout to 2.5 seconds
+* Prevent false positives by ensuring user exceptions are only exposed under concrete executions.
+
 ### 0.0.18
 * Ensure drawn floats respect hypothesis signed-zero semantics for min_value/max_value.
 

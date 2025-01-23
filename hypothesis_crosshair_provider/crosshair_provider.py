@@ -426,7 +426,7 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
         The return value should be a non-symbolic json-encodable dictionary,
         and will be included as `observation["metadata"]["backend"]`.
         """
-        if self.debug_buffer:
+        if getattr(self, "debug_buffer", None):
             lines = self.debug_buffer.getvalue().split("\n")
             messages = [
                 match.group(1) for match in map(_IMPORTANT_LOG_RE.match, lines) if match

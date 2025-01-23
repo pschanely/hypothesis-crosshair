@@ -419,6 +419,7 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                     map(deep_realize, self._hypothesis_draws)
                 )
                 self.doublecheck_inputs.reverse()
+                raise BackendCannotProceed("discard_test_case") from exc
 
     def observe_test_case(self) -> Dict[str, Any]:
         """Called at the end of the test case when observability mode is active.

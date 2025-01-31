@@ -58,6 +58,10 @@ pytest . --hypothesis-profile=crosshair
 ### Next Version
 * Nothing yet
 
+### 0.0.20
+* Avoid potential import warning when registering ourself with hypothesis.
+* Skip constraint checking when performing a concrete re-execution.
+
 ### 0.0.19
 * Limit the re-thow behavior in 0.0.17 to Unsatisfiable errors exclusively
 * Change default path timeout to 2.5 seconds

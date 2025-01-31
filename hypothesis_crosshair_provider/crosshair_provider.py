@@ -143,7 +143,10 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
         debug("starting iteration", self.iteration_number)
         self._hypothesis_draws = []  # keep a log of drawn values
         if self.doublecheck_inputs is not None:
-            debug("Replaying a (concrete) version of the prior iteration. Draws: ", self.doublecheck_inputs)
+            debug(
+                "Replaying a (concrete) version of the prior iteration. Draws: ",
+                self.doublecheck_inputs,
+            )
             try:
                 yield
                 debug("Finished concrete replay, but did not encounter an exception!")
@@ -237,7 +240,7 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                     bool, self._next_name("bool"), allow_subtypes=False
                 )
             else:
-                symbolic = self._replayed_draw(bool)
+                return self._replayed_draw(bool)
             self._remember_draw(symbolic)
             return symbolic
 
@@ -260,7 +263,7 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                     int, self._next_name("int"), allow_subtypes=False
                 )
             else:
-                symbolic = self._replayed_draw(int)
+                return self._replayed_draw(int)
         conditions = []
         if min_value is not None:
             conditions.append(min_value <= symbolic)
@@ -298,7 +301,7 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                     float, self._next_name("float"), allow_subtypes=False
                 )
             else:
-                symbolic = self._replayed_draw(float)
+                return self._replayed_draw(float)
         if math.isnan(symbolic):
             if not allow_nan:
                 raise IgnoreAttempt
@@ -348,7 +351,7 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                     SymbolicBoundedIntTuple(intervals.intervals, self._next_name("str"))
                 )
             else:
-                symbolic = self._replayed_draw(str)
+                return self._replayed_draw(str)
         conditions = []
         if min_size > 0:
             conditions.append(len(symbolic) >= min_size)
@@ -377,7 +380,7 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                     bytes, self._next_name("bytes"), allow_subtypes=False
                 )
             else:
-                symbolic = self._replayed_draw(bytes)
+                return self._replayed_draw(bytes)
         mylen = len(symbolic)
         all_conditions = all([min_size <= mylen, mylen <= max_size])
         with NoTracing():

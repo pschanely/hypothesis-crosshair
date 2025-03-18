@@ -5,7 +5,7 @@ import sys
 from contextlib import ExitStack, contextmanager
 from io import StringIO
 from time import monotonic
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Type, TypeVar
 
 import crosshair.core_and_libs  # Needed for patch registrations
 from crosshair import debug, deep_realize
@@ -36,6 +36,8 @@ from hypothesis.errors import BackendCannotProceed, Unsatisfiable
 from hypothesis.internal.conjecture.data import PrimitiveProvider
 from hypothesis.internal.intervalsets import IntervalSet
 from hypothesis.internal.observability import TESTCASE_CALLBACKS
+
+_T = TypeVar("_T")
 
 _IMPORTANT_LOG_RE = re.compile(".*((?:SMT realized symbolic.*)|(?:SMT chose.*))$")
 
@@ -93,7 +95,7 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
         )
         return space
 
-    def _replayed_draw(self, expected_type):
+    def _replayed_draw(self, expected_type: Type[_T]) -> _T:
         if not self.doublecheck_inputs:
             if self.doublecheck_inputs is None:
                 raise CrossHairInternal
@@ -101,9 +103,9 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                 "Inconsistent behavior on concrete replay:",
                 "first run has exhausted its inputs, but a value of type",
                 expected_type,
-                "was requested",
+                "was requested.  Using a default value instead.",
             )
-            raise BackendCannotProceed("verified")
+            return expected_type()
         value = self.doublecheck_inputs.pop()
         if isinstance(value, expected_type):
             return value
@@ -112,9 +114,9 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
             type(value),
             "found from first run, but",
             expected_type,
-            "was requested",
+            "was requested. Using a default value instead.",
         )
-        raise BackendCannotProceed("verified")
+        return expected_type()
 
     def bubble_status(self):
         if self._previous_space is not None:
@@ -144,7 +146,7 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
         self._hypothesis_draws = []  # keep a log of drawn values
         if self.doublecheck_inputs is not None:
             debug(
-                "Replaying a (concrete) version of the prior iteration. Draws: ",
+                "Replaying a (concrete) version of the prior iteration. Draw stack: ",
                 self.doublecheck_inputs,
             )
             try:
@@ -250,7 +252,7 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
         max_value: Optional[int] = None,
         *,
         # weights are for choosing an element index from a bounded range
-        weights: Optional[Sequence[float]] = None,
+        weights: Optional[dict[int, float]] = None,
         shrink_towards: int = 0,
         forced: Optional[int] = None,
         fake_forced: bool = False,
@@ -367,7 +369,7 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
     def draw_bytes(
         self,
         min_size: int = 0,
-        max_size: int = math.inf,
+        max_size: int = 10**10,
         *,
         forced: Optional[bytes] = None,
         fake_forced: bool = False,

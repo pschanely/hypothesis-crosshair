@@ -180,7 +180,8 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                         self._previous_space = space
                         current_exc = sys.exc_info()[1]
                         if not isinstance(
-                            current_exc, (BackendCannotProceed, UnexploredPath)
+                            current_exc,
+                            (BackendCannotProceed, UnexploredPath, KeyboardInterrupt),
                         ):
                             with ResumedTracing():
                                 space.detach_path(currently_handling=current_exc)

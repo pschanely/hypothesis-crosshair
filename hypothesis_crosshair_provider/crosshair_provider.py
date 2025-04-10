@@ -65,6 +65,7 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
         self._previous_space = None
         self.exhausted = False
         self.doublecheck_inputs: Optional[List] = None
+        self.span_depth = 0
 
     @contextmanager
     def post_test_case_context_manager(self):
@@ -223,6 +224,13 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
     def _remember_draw(self, symbolic):
         self._hypothesis_draws.append(symbolic)
 
+    def _bias_towards_value(self, symbolic, value, probability=0.5):
+        context_statespace().smt_fork(
+            symbolic.var == value,
+            desc="bias_towards_shrunken",
+            probability_true=probability,
+        )
+
     def draw_boolean(
         self,
         p: float = 0.5,
@@ -242,6 +250,12 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                 symbolic = proxy_for_type(
                     bool, self._next_name("bool"), allow_subtypes=False
                 )
+                if self.span_depth >= 2:
+                    self._bias_towards_value(
+                        symbolic,
+                        False,
+                        probability=self.span_depth / (self.span_depth + 1),
+                    )
             else:
                 return self._replayed_draw(bool)
             self._remember_draw(symbolic)
@@ -265,6 +279,10 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                 symbolic = proxy_for_type(
                     int, self._next_name("int"), allow_subtypes=False
                 )
+                if self.span_depth >= 2:
+                    self._bias_towards_value(
+                        symbolic, 0, probability=self.span_depth / (self.span_depth + 1)
+                    )
             else:
                 return self._replayed_draw(int)
         conditions = []
@@ -442,3 +460,20 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                 "messages": messages,
             }
         return {}
+
+    def span_start(self, label: int, /) -> None:
+        """Marks the beginning of a semantically meaningful span.
+
+        `label` is an opaque integer, which will be shared by all spans drawn
+        from a particular strategy.
+        """
+        self.span_depth += 1
+
+    def span_end(self, discard: bool, /) -> None:
+        """Marks the end of a semantically meaningful span.
+
+        `discard` is True when the draw was filtered out or otherwise marked as
+        unlikely to contribute to the input data as seen by the user's test.
+        Note however that side effects can make this determination unsound.
+        """
+        self.span_depth -= 1

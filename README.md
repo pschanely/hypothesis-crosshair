@@ -58,6 +58,10 @@ pytest . --hypothesis-profile=crosshair
 ### Next Version
 * Nothing yet
 
+### 0.0.21
+* Avoid occasional unexpected errors when stopping a test run with Ctrl-C.
+* Prevent over-expansion when generating recursive datastructures. (fixes [#27](https://github.com/pschanely/hypothesis-crosshair/issues/27))
+
 ### 0.0.20
 * Avoid potential import warning when registering ourself with hypothesis.
 * Skip constraint checking when performing a concrete re-execution.

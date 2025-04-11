@@ -143,6 +143,7 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
             set_debug(True, sys.stderr)
         self.bubble_status()
         self.iteration_number += 1
+        self.span_depth = 0
         debug("starting iteration", self.iteration_number)
         self._hypothesis_draws = []  # keep a log of drawn values
         if self.doublecheck_inputs is not None:
@@ -250,11 +251,11 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                 symbolic = proxy_for_type(
                     bool, self._next_name("bool"), allow_subtypes=False
                 )
-                if self.span_depth >= 2:
+                if self.span_depth >= 6:
                     self._bias_towards_value(
                         symbolic,
                         False,
-                        probability=self.span_depth / (self.span_depth + 1),
+                        probability=self.span_depth / (self.span_depth + 2),
                     )
             else:
                 return self._replayed_draw(bool)
@@ -467,6 +468,7 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
         `label` is an opaque integer, which will be shared by all spans drawn
         from a particular strategy.
         """
+        debug("span_start label=", label)
         self.span_depth += 1
 
     def span_end(self, discard: bool, /) -> None:
@@ -476,4 +478,5 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
         unlikely to contribute to the input data as seen by the user's test.
         Note however that side effects can make this determination unsound.
         """
+        debug("span_end, discard=", discard)
         self.span_depth -= 1

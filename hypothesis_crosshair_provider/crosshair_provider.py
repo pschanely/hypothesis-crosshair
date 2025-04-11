@@ -104,9 +104,9 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                 "Inconsistent behavior on concrete replay:",
                 "first run has exhausted its inputs, but a value of type",
                 expected_type,
-                "was requested.  Using a default value instead.",
+                "was requested.",
             )
-            return expected_type()
+            raise BackendCannotProceed("discard_test_case")
         value = self.doublecheck_inputs.pop()
         if isinstance(value, expected_type):
             return value
@@ -115,9 +115,9 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
             type(value),
             "found from first run, but",
             expected_type,
-            "was requested. Using a default value instead.",
+            "was requested.",
         )
-        return expected_type()
+        raise BackendCannotProceed("discard_test_case")
 
     def bubble_status(self):
         if self._previous_space is not None:

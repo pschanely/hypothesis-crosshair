@@ -280,9 +280,9 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                 symbolic = proxy_for_type(
                     int, self._next_name("int"), allow_subtypes=False
                 )
-                if self.span_depth >= 2:
+                if self.span_depth >= 6:
                     self._bias_towards_value(
-                        symbolic, 0, probability=self.span_depth / (self.span_depth + 1)
+                        symbolic, 0, probability=self.span_depth / (self.span_depth + 2)
                     )
             else:
                 return self._replayed_draw(int)

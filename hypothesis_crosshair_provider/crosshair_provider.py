@@ -255,7 +255,7 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                     self._bias_towards_value(
                         symbolic,
                         False,
-                        probability=self.span_depth / (self.span_depth + 2),
+                        probability=self.span_depth / (self.span_depth + 3),
                     )
             else:
                 return self._replayed_draw(bool)
@@ -282,7 +282,7 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                 )
                 if self.span_depth >= 6:
                     self._bias_towards_value(
-                        symbolic, 0, probability=self.span_depth / (self.span_depth + 2)
+                        symbolic, 0, probability=self.span_depth / (self.span_depth + 3)
                     )
             else:
                 return self._replayed_draw(int)

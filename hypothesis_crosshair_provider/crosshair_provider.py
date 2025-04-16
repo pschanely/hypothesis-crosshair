@@ -2,6 +2,7 @@ import math
 import os
 import re
 import sys
+from collections import defaultdict
 from contextlib import ExitStack, contextmanager
 from io import StringIO
 from time import monotonic
@@ -46,6 +47,28 @@ def is_negative(x):
     return math.copysign(1, x) == -1
 
 
+class SpanTracker:
+    def __init__(self) -> None:
+        self.spans: List[int] = []
+        self.span_depths: defaultdict[int, int] = defaultdict(int)
+
+    def span_start(self, label: int) -> None:
+        self.spans.append(label)
+        self.span_depths[label] += 1
+        debug("span_start label=", label)
+
+    def span_end(self) -> None:
+        if self.spans:
+            label = self.spans.pop()
+            self.span_depths[label] -= 1
+            debug("span_end")
+        else:
+            debug("span mismatch; ended without any starts remaining")
+
+    def depth(self) -> int:
+        return max(self.span_depths.values(), default=0)
+
+
 class CrossHairPrimitiveProvider(PrimitiveProvider):
     """An implementation of PrimitiveProvider based on CrossHair."""
 
@@ -65,7 +88,7 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
         self._previous_space = None
         self.exhausted = False
         self.doublecheck_inputs: Optional[List] = None
-        self.span_depth = 0
+        self.span_tracker = SpanTracker()
 
     @contextmanager
     def post_test_case_context_manager(self):
@@ -143,7 +166,7 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
             set_debug(True, sys.stderr)
         self.bubble_status()
         self.iteration_number += 1
-        self.span_depth = 0
+        self.span_tracker = SpanTracker()
         debug("starting iteration", self.iteration_number)
         self._hypothesis_draws = []  # keep a log of drawn values
         if self.doublecheck_inputs is not None:
@@ -213,6 +236,11 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
             raise
         except Exception as exc:
             self.handle_user_exception(exc)
+        if self.span_tracker.spans:
+            # We could check this in more places, but the exception cases are overly complex
+            debug(
+                "span mismatch; labels started but not ended:", self.span_tracker.spans
+            )
 
     def _next_name(self, prefix: str) -> str:
         space = context_statespace()
@@ -242,20 +270,21 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
         with NoTracing():
             if forced is not None:
                 return forced
-        if p == 0.0:
+        if p <= 0.0:
             return False
-        elif p == 1.0:
+        elif p >= 1.0:
             return True
         with NoTracing():
             if self.doublecheck_inputs is None:
                 symbolic = proxy_for_type(
                     bool, self._next_name("bool"), allow_subtypes=False
                 )
-                if self.span_depth >= 6:
+                span_depth = self.span_tracker.depth()
+                if span_depth >= 4:
                     self._bias_towards_value(
                         symbolic,
                         False,
-                        probability=self.span_depth / (self.span_depth + 3),
+                        probability=span_depth / (span_depth + 2),
                     )
             else:
                 return self._replayed_draw(bool)
@@ -280,9 +309,10 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                 symbolic = proxy_for_type(
                     int, self._next_name("int"), allow_subtypes=False
                 )
-                if self.span_depth >= 6:
+                span_depth = self.span_tracker.depth()
+                if span_depth >= 4:
                     self._bias_towards_value(
-                        symbolic, 0, probability=self.span_depth / (self.span_depth + 3)
+                        symbolic, 0, probability=span_depth / (span_depth + 2)
                     )
             else:
                 return self._replayed_draw(int)
@@ -468,8 +498,7 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
         `label` is an opaque integer, which will be shared by all spans drawn
         from a particular strategy.
         """
-        debug("span_start label=", label)
-        self.span_depth += 1
+        self.span_tracker.span_start(label)
 
     def span_end(self, discard: bool, /) -> None:
         """Marks the end of a semantically meaningful span.
@@ -478,5 +507,4 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
         unlikely to contribute to the input data as seen by the user's test.
         Note however that side effects can make this determination unsound.
         """
-        debug("span_end, discard=", discard)
-        self.span_depth -= 1
+        self.span_tracker.span_end()

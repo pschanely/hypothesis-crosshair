@@ -58,6 +58,11 @@ pytest . --hypothesis-profile=crosshair
 ### Next Version
 * Nothing yet
 
+### 0.0.22
+* Abort concrete executions with invalid draws.
+  (fixes [#29](https://github.com/pschanely/hypothesis-crosshair/issues/29))
+* Adjust how the preventative measures in v0.0.21 work for recursive datastructures.
+
 ### 0.0.21
 * Avoid occasional unexpected errors when stopping a test run with Ctrl-C.
 * Prevent over-expansion when generating recursive datastructures. (fixes [#27](https://github.com/pschanely/hypothesis-crosshair/issues/27))

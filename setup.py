@@ -2,7 +2,7 @@ import setuptools
 
 setuptools.setup(
     name="hypothesis-crosshair",
-    version="0.0.21",
+    version="0.0.22",
     author="Phillip Schanely",
     author_email="pschanely+B9vk@gmail.com",
     packages=setuptools.find_packages(),
@@ -29,6 +29,7 @@ setuptools.setup(
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
         "Programming Language :: Python :: 3.12",
+        "Programming Language :: Python :: 3.13",
         "Topic :: Software Development :: Testing",
     ],
 )

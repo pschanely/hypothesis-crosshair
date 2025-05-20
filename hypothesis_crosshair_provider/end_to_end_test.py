@@ -3,6 +3,8 @@ import os
 import re
 
 import pytest
+from crosshair.core import is_tracing
+from crosshair.util import PathTimeout
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from hypothesis.stateful import RuleBasedStateMachine, rule, run_state_machine_as_test
@@ -144,3 +146,21 @@ def test_datetimes_can_generate_in_few_iterations():
 
     with pytest.raises(Exception, match="generated one"):
         f()
+
+
+def test_incomplete_exhaustion_does_not_claim_verified():
+    @given(st.integers())
+    @settings(backend="crosshair", deadline=None, max_examples=10)
+    def f(n):
+        if n > 10:
+            if is_tracing():
+                raise PathTimeout
+            else:
+                assert False, "hypothesis will find this error"
+
+    try:
+        f()
+    except AssertionError as e:
+        exc_text = str(e) + " ".join(e.__notes__)
+        print("exc_text", exc_text)
+        assert "please send them a bug report" not in exc_text

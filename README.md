@@ -58,6 +58,10 @@ pytest . --hypothesis-profile=crosshair
 ### Next Version
 * Nothing yet
 
+### 0.0.23
+* Prevent an incorrect verified claim under SMT-heavy analysis.
+  (fixes [pschanely/CrossHair#354](https://github.com/pschanely/CrossHair/issues/354))
+
 ### 0.0.22
 * Abort concrete executions with invalid draws.
   (fixes [#29](https://github.com/pschanely/hypothesis-crosshair/issues/29))

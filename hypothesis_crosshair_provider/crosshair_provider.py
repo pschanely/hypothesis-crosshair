@@ -78,6 +78,7 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
         self.iteration_number = 0
         self.current_exit_stack: Optional[ExitStack] = None
         self.search_root = RootNode()
+        self.covering = True
         if len(os.environ.get("DEBUG_CROSSHAIR", "")) > 0:
             self.debug_to_stderr = os.environ["DEBUG_CROSSHAIR"].lower() not in (
                 "0",
@@ -185,7 +186,10 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                 self.doublecheck_inputs = None
         if self.exhausted:
             self.set_completion("exhausted all paths - nothing else to do")
-            raise BackendCannotProceed("verified")
+            if self.covering:
+                raise BackendCannotProceed("verified")
+            else:
+                raise BackendCannotProceed("exhausted")
         space = self._make_statespace()
 
         try:
@@ -213,6 +217,8 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
             self.set_completion("completed normally")
             debug("ended iteration (normal completion)")
         except (IgnoreAttempt, UnexploredPath, NotDeterministic) as exc:
+            if isinstance(exc, (UnexploredPath, NotDeterministic)):
+                self.covering = False
             exc_name = type(exc).__name__
             debug(f"ended iteration ({exc_name})")
             completion_text = {

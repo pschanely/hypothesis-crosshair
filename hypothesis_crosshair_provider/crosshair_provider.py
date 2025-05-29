@@ -33,7 +33,7 @@ from crosshair.libimpl.builtinslib import LazyIntSymbolicStr, SymbolicBoundedInt
 from crosshair.statespace import prefer_true
 from crosshair.util import CrossHairInternal, NotDeterministic, ch_stack, set_debug
 from hypothesis import settings
-from hypothesis.errors import BackendCannotProceed, Unsatisfiable
+from hypothesis.errors import BackendCannotProceed, HypothesisException
 from hypothesis.internal.conjecture.data import PrimitiveProvider
 from hypothesis.internal.intervalsets import IntervalSet
 from hypothesis.internal.observability import TESTCASE_CALLBACKS
@@ -230,6 +230,9 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
             }.get(exc_name, exc_name)
             self.set_completion(f"ignored due to {completion_text}")
             raise BackendCannotProceed("discard_test_case") from exc
+        except HypothesisException as exc:
+            self.set_completion(f"forwarded hypothesis {type(exc).__name__} exception")
+            raise
         except TypeError as exc:
             if suspected_proxy_intolerance_exception(exc):
                 debug("ended iteration (ignored iteration)")
@@ -237,11 +240,11 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                 raise BackendCannotProceed("discard_test_case")
             else:
                 self.handle_user_exception(exc)
-        except Unsatisfiable as exc:
-            self.set_completion(f"forwarded Unsatisfiable exception")
-            raise
         except Exception as exc:
             self.handle_user_exception(exc)
+        except BaseException as exc:
+            self.set_completion(f"forwarded {type(exc).__name__} (base) exception")
+            raise
         if self.span_tracker.spans:
             # We could check this in more places, but the exception cases are overly complex
             debug(

@@ -58,6 +58,10 @@ pytest . --hypothesis-profile=crosshair
 ### Next Version
 * Nothing yet
 
+### 0.0.24
+* Do not attempt to capture and retry hypothesis internal exceptions.
+  (fixes [#34](https://github.com/pschanely/hypothesis-crosshair/issues/34))
+
 ### 0.0.23
 * Prevent an incorrect verified claim under SMT-heavy analysis.
   (fixes [pschanely/CrossHair#354](https://github.com/pschanely/CrossHair/issues/354))

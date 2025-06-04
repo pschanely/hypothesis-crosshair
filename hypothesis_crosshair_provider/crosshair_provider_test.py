@@ -1,8 +1,12 @@
 import types
 
+from hypothesis import settings, strategies as st
 from hypothesis.errors import BackendCannotProceed
+from hypothesis.internal.conjecture.provider_conformance import run_conformance_test
 from hypothesis.internal.intervalsets import IntervalSet
 
+from crosshair.core import IgnoreAttempt, UnexploredPath
+from crosshair.util import NotDeterministic
 from hypothesis_crosshair_provider.crosshair_provider import CrossHairPrimitiveProvider
 
 
@@ -101,3 +105,18 @@ def test_value_export_with_no_decisions():
     with provider.per_test_case_context_manager():
         s_int = provider.draw_integer()
     assert type(provider.export_value(s_int)) is int
+
+
+def test_provider_conformance_crosshair():
+    # Hypothesis can in theory pass values of any type to `realize`,
+    # but the default strategy in the conformance test here acts too much like a
+    # fuzzer for crosshair internals here and finds very strange errors.
+    _realize_objects = (
+        st.integers() | st.floats() | st.booleans() | st.binary() | st.text()
+    )
+    run_conformance_test(
+        CrossHairPrimitiveProvider,
+        context_manager_exceptions=(IgnoreAttempt, UnexploredPath, NotDeterministic),
+        settings=settings(max_examples=5, stateful_step_count=10),
+        _realize_objects=_realize_objects,
+    )

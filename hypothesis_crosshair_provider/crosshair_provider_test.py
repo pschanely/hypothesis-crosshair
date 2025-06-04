@@ -1,12 +1,13 @@
 import types
 
-from hypothesis import settings, strategies as st
+from crosshair.core import IgnoreAttempt, UnexploredPath
+from crosshair.util import NotDeterministic
+from hypothesis import settings
+from hypothesis import strategies as st
 from hypothesis.errors import BackendCannotProceed
 from hypothesis.internal.conjecture.provider_conformance import run_conformance_test
 from hypothesis.internal.intervalsets import IntervalSet
 
-from crosshair.core import IgnoreAttempt, UnexploredPath
-from crosshair.util import NotDeterministic
 from hypothesis_crosshair_provider.crosshair_provider import CrossHairPrimitiveProvider
 
 

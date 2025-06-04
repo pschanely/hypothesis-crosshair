@@ -1,3 +1,51 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hypothesis-crosshair"
+version = "0.0.24"
+description = "Level-up your Hypothesis tests with CrossHair."
+readme = "README.md"
+authors = [
+    { name = "Phillip Schanely", email = "pschanely+B9vk@gmail.com" },
+]
+license = { file = "LICENSE" }
+requires-python = ">=3.8"
+dependencies = [
+    "hypothesis>=6.113.0",
+    "crosshair-tool>=0.0.74"
+]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Framework :: Hypothesis",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Testing",
+]
+
+[project.urls]
+Homepage = "https://github.com/pschanely/hypothesis-crosshair"
+
+[project.entry-points.hypothesis]
+_ = "hypothesis_crosshair_provider:_hypothesis_setup_hook"
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "black",
+    "isort"
+]
+
 [tool.isort]
 profile = "black"
 skip_gitignore = true

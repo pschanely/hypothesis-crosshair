@@ -15,6 +15,6 @@ def _hypothesis_setup_hook(*a, **kw):
                 "This version of hypothesis doesn't support the CrossHair backend"
             )
             return
-    AVAILABLE_PROVIDERS[
-        "crosshair"
-    ] = "hypothesis_crosshair_provider.crosshair_provider.CrossHairPrimitiveProvider"
+    AVAILABLE_PROVIDERS["crosshair"] = (
+        "hypothesis_crosshair_provider.crosshair_provider.CrossHairPrimitiveProvider"
+    )

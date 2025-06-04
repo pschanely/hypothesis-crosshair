@@ -16,7 +16,6 @@ dependencies = [
     "hypothesis>=6.113.0",
     "crosshair-tool>=0.0.74"
 ]
-homepage = "https://github.com/pschanely/hypothesis-crosshair"
 classifiers = [
     "Development Status :: 2 - Pre-Alpha",
     "Framework :: Hypothesis",

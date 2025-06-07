@@ -41,9 +41,9 @@ _ = "hypothesis_crosshair_provider:_hypothesis_setup_hook"
 
 [project.optional-dependencies]
 dev = [
-    "pytest",
-    "black",
-    "isort"
+    "pytest==7.4.0",
+    "black==23.3.0",
+    "isort==5.12.0"
 ]
 
 [tool.isort]

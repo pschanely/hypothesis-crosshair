@@ -58,6 +58,10 @@ pytest . --hypothesis-profile=crosshair
 ### Next Version
 * Nothing yet
 
+### 0.0.25
+* Prevent internal crosshair errors from getting exposed while trying to 
+  recover from a user-level exception.
+
 ### 0.0.24
 * Do not attempt to capture and retry hypothesis internal exceptions.
   (fixes [#34](https://github.com/pschanely/hypothesis-crosshair/issues/34))

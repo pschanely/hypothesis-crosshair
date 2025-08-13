@@ -461,7 +461,12 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
             else:
                 with self.post_test_case_context_manager():
                     return deep_realize(value)
-        except (IgnoreAttempt, UnexploredPath):
+        except (IgnoreAttempt, UnexploredPath) as realization_exception:
+            debug(
+                "Ignoring exception during realization:",
+                type(realization_exception).__name__,
+                realization_exception,
+            )
             raise BackendCannotProceed("discard_test_case")
 
     def post_test_case_hook(self, val):
@@ -473,17 +478,28 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
     def handle_user_exception(self, exc: Exception) -> None:
         with self.post_test_case_context_manager():
             with NoTracing():
-                exc.args = deep_realize(exc.args)
-                debug(
-                    f"ended iteration (exception: {type(exc).__name__}: {exc})",
-                    ch_stack(currently_handling=exc),
-                )
-                self.set_completion(f"raised {type(exc).__name__} exception")
-                self.doublecheck_inputs = list(
-                    map(deep_realize, self._hypothesis_draws)
-                )
-                self.doublecheck_inputs.reverse()
-                raise BackendCannotProceed("discard_test_case") from exc
+                try:
+                    exc.args = deep_realize(exc.args)
+                    debug(
+                        f"ended iteration (exception: {type(exc).__name__}: {exc})",
+                        ch_stack(currently_handling=exc),
+                    )
+                    self.doublecheck_inputs = list(
+                        map(deep_realize, self._hypothesis_draws)
+                    )
+                    self.doublecheck_inputs.reverse()
+                    self.set_completion(f"raised {type(exc).__name__} exception")
+                    raise BackendCannotProceed("discard_test_case") from exc
+                except (IgnoreAttempt, UnexploredPath) as realization_exception:
+                    debug(
+                        "Ignoring exception during realization:",
+                        type(realization_exception).__name__,
+                        realization_exception,
+                    )
+                    self.set_completion(
+                        f"raised {type(exc).__name__} exception, but unable to realize for concrete replay"
+                    )
+                    raise BackendCannotProceed("discard_test_case")
 
     def observe_test_case(self) -> Dict[str, Any]:
         """Called at the end of the test case when observability mode is active.

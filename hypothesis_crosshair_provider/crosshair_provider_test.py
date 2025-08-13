@@ -1,7 +1,13 @@
 import types
+from unittest.mock import patch
 
-from crosshair.core import IgnoreAttempt, UnexploredPath
-from crosshair.util import NotDeterministic
+import pytest
+from crosshair.util import (
+    IgnoreAttempt,
+    NotDeterministic,
+    UnexploredPath,
+    UnknownSatisfiability,
+)
 from hypothesis import settings
 from hypothesis import strategies as st
 from hypothesis.errors import BackendCannotProceed
@@ -121,3 +127,24 @@ def test_provider_conformance_crosshair():
         settings=settings(max_examples=5, stateful_step_count=10),
         _realize_objects=_realize_objects,
     )
+
+
+@patch("crosshair.statespace.solver_is_sat", side_effect=UnknownSatisfiability)
+def test_unsat_during_realization(solver_is_sat_mock):
+    provider = CrossHairPrimitiveProvider()
+    with provider.per_test_case_context_manager():
+        s_int = provider.draw_integer()
+    with provider.post_test_case_context_manager():
+        with pytest.raises(BackendCannotProceed):
+            provider.export_value(s_int)
+    assert solver_is_sat_mock.call_count == 1
+
+
+@patch("crosshair.statespace.solver_is_sat", side_effect=UnknownSatisfiability)
+def test_unsat_during_user_exception_realization(solver_is_sat_mock):
+    provider = CrossHairPrimitiveProvider()
+    with pytest.raises(BackendCannotProceed):
+        with provider.per_test_case_context_manager():
+            s_int = provider.draw_integer()
+            raise TargetException
+    assert solver_is_sat_mock.call_count == 1

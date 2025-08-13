@@ -1,4 +1,3 @@
-import types
 from unittest.mock import patch
 
 import pytest
@@ -56,7 +55,7 @@ def test_basic_loop():
             assert type(provider.export_value(s_str)) == str
             # NOTE: draw_bytes can raise IgnoreAttempt, which will leave the bytes
             # symbolic without a concrete value:
-            assert type(provider.export_value(s_bytes)) in (bytes, types.NoneType)
+            assert type(provider.export_value(s_bytes)) in (bytes, type(None))
         except BackendCannotProceed:
             pass
         except TargetException:

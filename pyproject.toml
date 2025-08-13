@@ -11,9 +11,9 @@ authors = [
     { name = "Phillip Schanely", email = "pschanely+B9vk@gmail.com" },
 ]
 license = { file = "LICENSE" }
-requires-python = ">=3.8"
+requires-python = ">=3.9"
 dependencies = [
-    "hypothesis>=6.113.0",
+    "hypothesis>=6.137.0",
     "crosshair-tool>=0.0.74"
 ]
 classifiers = [
@@ -39,7 +39,7 @@ Homepage = "https://github.com/pschanely/hypothesis-crosshair"
 [project.entry-points.hypothesis]
 _ = "hypothesis_crosshair_provider:_hypothesis_setup_hook"
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = [
     "pytest==7.4.0",
     "black==23.3.0",

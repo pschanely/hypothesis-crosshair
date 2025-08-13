@@ -36,7 +36,7 @@ from hypothesis import settings
 from hypothesis.errors import BackendCannotProceed, HypothesisException
 from hypothesis.internal.conjecture.data import PrimitiveProvider
 from hypothesis.internal.intervalsets import IntervalSet
-from hypothesis.internal.observability import TESTCASE_CALLBACKS
+from hypothesis.internal.observability import observability_enabled
 
 _T = TypeVar("_T")
 
@@ -160,7 +160,7 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
     def per_test_case_context_manager(self):
         if is_tracing():
             raise BaseException("The CrossHair provider context is not reentrant")
-        if TESTCASE_CALLBACKS:
+        if observability_enabled():
             self.debug_buffer = StringIO()
             set_debug(True, self.debug_buffer)
         elif self.debug_to_stderr:

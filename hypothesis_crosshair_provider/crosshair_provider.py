@@ -472,7 +472,7 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
     def post_test_case_hook(self, val):
         return self.export_value(val)
 
-    def realize(self, value):
+    def realize(self, value, for_failure: bool = False):
         return self.export_value(value)
 
     def handle_user_exception(self, exc: Exception) -> None:

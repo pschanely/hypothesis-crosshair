@@ -9,19 +9,21 @@ on:
 jobs:
   lint-and-test:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Set up Python
-        uses: actions/setup-python@v3
+        uses: astral-sh/setup-uv@v6
         with:
-          python-version: '3.x'
+          python-version: ${{ matrix.python-version }}
       - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install .[dev]
+        run: uv sync
       - name: Run black
-        run: black --check .
+        run: uv run black --check .
       - name: Run isort
-        run: isort --check-only .
+        run: uv run isort --check-only .
       - name: Run pytest
-        run: pytest
+        run: uv run pytest

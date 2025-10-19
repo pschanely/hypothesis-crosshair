@@ -14,7 +14,7 @@ license = { file = "LICENSE" }
 requires-python = ">=3.9"
 dependencies = [
     "hypothesis>=6.137.0",
-    "crosshair-tool>=0.0.74"
+    "crosshair-tool>=0.0.97"
 ]
 classifiers = [
     "Development Status :: 2 - Pre-Alpha",

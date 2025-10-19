@@ -30,7 +30,7 @@ from crosshair.core import (
     suspected_proxy_intolerance_exception,
 )
 from crosshair.libimpl.builtinslib import LazyIntSymbolicStr, SymbolicBoundedIntTuple
-from crosshair.statespace import prefer_true
+from crosshair.statespace import optional_context_statespace, prefer_true
 from crosshair.util import CrossHairInternal, NotDeterministic, ch_stack, set_debug
 from hypothesis import settings
 from hypothesis.errors import BackendCannotProceed, HypothesisException
@@ -451,7 +451,7 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
             else:
                 raise IgnoreAttempt
 
-    def export_value(self, value):
+    def realize(self, value, *, for_failure: bool = False):
         try:
             if is_tracing():
                 # hypothesis is handling an exception; sever the path tree:
@@ -460,6 +460,13 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                 return deep_realize(value)
             else:
                 with self.post_test_case_context_manager():
+                    maybe_space = optional_context_statespace()
+                    if maybe_space and not getattr(self, "_extended_timeouts", False):
+                        maybe_space.extend_timeouts(
+                            constant_factor=30.0, smt_multiple=10.0
+                        )
+                        self._extended_timeouts = True
+
                     return deep_realize(value)
         except (IgnoreAttempt, UnexploredPath) as realization_exception:
             debug(
@@ -468,12 +475,6 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                 realization_exception,
             )
             raise BackendCannotProceed("discard_test_case")
-
-    def post_test_case_hook(self, val):
-        return self.export_value(val)
-
-    def realize(self, value, for_failure: bool = False):
-        return self.export_value(value)
 
     def handle_user_exception(self, exc: Exception) -> None:
         with self.post_test_case_context_manager():

@@ -49,13 +49,13 @@ def test_basic_loop():
                 assert type(s_bytes) == bytes
                 _example_user_code(s_bool, s_int, s_float, s_str, s_bytes)
             # assert provider.completion == "completed normally"
-            assert type(provider.export_value(s_bool)) == bool
-            assert type(provider.export_value(s_int)) == int
-            assert type(provider.export_value(s_float)) == float
-            assert type(provider.export_value(s_str)) == str
+            assert type(provider.realize(s_bool)) == bool
+            assert type(provider.realize(s_int)) == int
+            assert type(provider.realize(s_float)) == float
+            assert type(provider.realize(s_str)) == str
             # NOTE: draw_bytes can raise IgnoreAttempt, which will leave the bytes
             # symbolic without a concrete value:
-            assert type(provider.export_value(s_bytes)) in (bytes, type(None))
+            assert type(provider.realize(s_bytes)) in (bytes, type(None))
         except BackendCannotProceed:
             pass
         except TargetException:
@@ -70,8 +70,8 @@ def test_post_run_value_export():
         if s_int > 10:
             pass
     assert provider.completion == "completed normally"
-    assert type(provider.export_value(s_int)) is int
-    assert type(provider.export_value([s_int])[0]) is int
+    assert type(provider.realize(s_int)) is int
+    assert type(provider.realize([s_int])[0]) is int
 
 
 def test_post_run_decisions_do_not_grow_the_search_tree():
@@ -99,7 +99,7 @@ def test_export_mid_run_does_not_grow_the_search_tree():
             s_int = provider.draw_integer()
             if s_int > 10:
                 pass
-            provider.export_value(s_int)
+            provider.realize(s_int)
         assert not provider.exhausted
         assert provider.completion == "completed normally"
     provider.bubble_status()
@@ -110,7 +110,7 @@ def test_value_export_with_no_decisions():
     provider = CrossHairPrimitiveProvider()
     with provider.per_test_case_context_manager():
         s_int = provider.draw_integer()
-    assert type(provider.export_value(s_int)) is int
+    assert type(provider.realize(s_int)) is int
 
 
 def test_provider_conformance_crosshair():
@@ -135,7 +135,7 @@ def test_unsat_during_realization(solver_is_sat_mock):
         s_int = provider.draw_integer()
     with provider.post_test_case_context_manager():
         with pytest.raises(BackendCannotProceed):
-            provider.export_value(s_int)
+            provider.realize(s_int)
     assert solver_is_sat_mock.call_count == 1
 
 

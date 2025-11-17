@@ -63,6 +63,15 @@ def test_basic_loop():
     assert found_ct > 0, "CrossHair could not find the exception"
 
 
+def test_string_draw_with_no_intervals():
+    """There is only one valid string with no intervals: the empty string. We produce a concrete value in this case."""
+    provider = CrossHairPrimitiveProvider()
+    with provider.per_test_case_context_manager():
+        x = provider.draw_string(IntervalSet.from_string(""))
+    assert type(x) is str
+    assert x == ""
+
+
 def test_post_run_value_export():
     provider = CrossHairPrimitiveProvider()
     with provider.per_test_case_context_manager():

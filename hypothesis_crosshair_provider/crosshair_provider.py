@@ -6,7 +6,7 @@ from collections import defaultdict
 from contextlib import ExitStack, contextmanager
 from io import StringIO
 from time import monotonic
-from typing import Any, Dict, List, Optional, Type, TypeVar
+from typing import Any, Dict, List, Optional, Type, TypeVar, Union
 
 import crosshair.core_and_libs  # Needed for patch registrations
 from crosshair import debug, deep_realize
@@ -408,9 +408,14 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                 return forced
             assert isinstance(intervals, IntervalSet)
             if self.doublecheck_inputs is None:
-                symbolic = LazyIntSymbolicStr(
-                    SymbolicBoundedIntTuple(intervals.intervals, self._next_name("str"))
-                )
+                if intervals:
+                    symbolic: Union[str, LazyIntSymbolicStr] = LazyIntSymbolicStr(
+                        SymbolicBoundedIntTuple(
+                            list(intervals.intervals), self._next_name("str")
+                        )
+                    )  # type: ignore
+                else:
+                    symbolic = ""  # (no valid characters)
             else:
                 return self._replayed_draw(str)
         conditions = []

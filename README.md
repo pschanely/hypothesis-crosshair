@@ -62,7 +62,6 @@ pytest . --hypothesis-profile=crosshair
 * Ensure CrossHair respects the no-characters-allowed constraint (`st.characters(alphabet="")`)
   constraint. This strategy should now produce only the empty string. (previously CrossHair would
   allow it to produce any string)
-* Extend CrossHair timeouts when attempting to report a failure.
 
 ### 0.0.25
 * Prevent internal crosshair errors from getting exposed while trying to 

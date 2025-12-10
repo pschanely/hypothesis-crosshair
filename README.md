@@ -58,6 +58,9 @@ pytest . --hypothesis-profile=crosshair
 ### Next Version
 * Nothing yet
 
+### 0.0.27
+* Prevent a NotDeterministic exception from escaping during post-test-run realization.
+
 ### 0.0.26
 * Ensure CrossHair respects the no-characters-allowed constraint (`st.characters(alphabet="")`).
   This strategy should now produce only the empty string. (previously CrossHair would

@@ -473,7 +473,11 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                         self._extended_timeouts = True
 
                     return deep_realize(value)
-        except (IgnoreAttempt, UnexploredPath) as realization_exception:
+        except (
+            IgnoreAttempt,
+            UnexploredPath,
+            NotDeterministic,
+        ) as realization_exception:
             debug(
                 "Ignoring exception during realization:",
                 type(realization_exception).__name__,

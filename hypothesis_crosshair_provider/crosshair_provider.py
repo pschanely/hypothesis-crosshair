@@ -171,15 +171,6 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
         self.span_tracker = SpanTracker()
         debug("starting iteration", self.iteration_number)
         self._hypothesis_draws = []  # keep a log of drawn values
-        if self.doublecheck_inputs is None and self._replay_queue:
-            # Warm-start: hypothesis has handed us a choice sequence (e.g. a
-            # high-coverage input from a Hypofuzz corpus) to replay before
-            # resuming our own symbolic exploration.
-            self.doublecheck_inputs = self._replay_queue.pop(0)
-            debug(
-                "Warm-start replaying a corpus input. Draw stack: ",
-                self.doublecheck_inputs,
-            )
         if self.doublecheck_inputs is not None:
             debug(
                 "Replaying a (concrete) version of the prior iteration. Draw stack: ",
@@ -187,7 +178,7 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
             )
             try:
                 yield
-                debug("Finished concrete replay without an exception.")
+                debug("Finished concrete replay, but did not encounter an exception!")
                 return
             except BaseException as exc:
                 debug("Finished concrete replay with exception:", type(exc), exc)
@@ -201,6 +192,17 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
             else:
                 raise BackendCannotProceed("exhausted")
         space = self._make_statespace()
+        if self._replay_queue:
+            # Warm-start: hand the next queued corpus input to CrossHair as a
+            # choice-sequence hint. Each draw will consume one entry via
+            # apply_next_hint, biasing the solver so that symbolic realizes to
+            # the corpus value for this iteration only; the search tree that
+            # records user-code branches remains traversable by later
+            # (unseeded) iterations, which pay back the seed by exploring its
+            # still-unvisited siblings.
+            corpus = self._replay_queue.pop(0)
+            debug("Warm-starting iteration with corpus input: ", corpus)
+            space.set_choice_hints(corpus)
 
         try:
             with (
@@ -298,6 +300,7 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                 symbolic = proxy_for_type(
                     bool, self._next_name("bool"), allow_subtypes=False
                 )
+                context_statespace().apply_next_hint(symbolic)
                 span_depth = self.span_tracker.depth()
                 if span_depth >= 4:
                     self._bias_towards_value(
@@ -328,6 +331,7 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                 symbolic = proxy_for_type(
                     int, self._next_name("int"), allow_subtypes=False
                 )
+                context_statespace().apply_next_hint(symbolic)
                 span_depth = self.span_tracker.depth()
                 if span_depth >= 4:
                     self._bias_towards_value(
@@ -371,6 +375,7 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                 symbolic = proxy_for_type(
                     float, self._next_name("float"), allow_subtypes=False
                 )
+                context_statespace().apply_next_hint(symbolic)
             else:
                 return self._replayed_draw(float)
         if math.isnan(symbolic):
@@ -424,6 +429,7 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                             list(intervals.intervals), self._next_name("str")
                         )
                     )  # type: ignore
+                    context_statespace().apply_next_hint(symbolic)
                 else:
                     symbolic = ""  # (no valid characters)
             else:
@@ -455,6 +461,7 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                 symbolic = proxy_for_type(
                     bytes, self._next_name("bytes"), allow_subtypes=False
                 )
+                context_statespace().apply_next_hint(symbolic)
             else:
                 return self._replayed_draw(bytes)
         mylen = len(symbolic)

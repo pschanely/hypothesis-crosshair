@@ -6,7 +6,7 @@ from collections import defaultdict
 from contextlib import ExitStack, contextmanager
 from io import StringIO
 from time import monotonic
-from typing import Any, Dict, List, Optional, Type, TypeVar, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Type, TypeVar, Union
 
 import crosshair.core_and_libs  # Needed for patch registrations
 from crosshair import debug, deep_realize
@@ -89,6 +89,7 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
         self._previous_space = None
         self.exhausted = False
         self.doublecheck_inputs: Optional[List] = None
+        self._replay_queue: List[List[Any]] = []
         self.span_tracker = SpanTracker()
 
     @contextmanager
@@ -170,6 +171,15 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
         self.span_tracker = SpanTracker()
         debug("starting iteration", self.iteration_number)
         self._hypothesis_draws = []  # keep a log of drawn values
+        if self.doublecheck_inputs is None and self._replay_queue:
+            # Warm-start: hypothesis has handed us a choice sequence (e.g. a
+            # high-coverage input from a Hypofuzz corpus) to replay before
+            # resuming our own symbolic exploration.
+            self.doublecheck_inputs = self._replay_queue.pop(0)
+            debug(
+                "Warm-start replaying a corpus input. Draw stack: ",
+                self.doublecheck_inputs,
+            )
         if self.doublecheck_inputs is not None:
             debug(
                 "Replaying a (concrete) version of the prior iteration. Draw stack: ",
@@ -177,7 +187,7 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
             )
             try:
                 yield
-                debug("Finished concrete replay, but did not encounter an exception!")
+                debug("Finished concrete replay without an exception.")
                 return
             except BaseException as exc:
                 debug("Finished concrete replay with exception:", type(exc), exc)
@@ -510,6 +520,19 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                         f"raised {type(exc).__name__} exception, but unable to realize for concrete replay"
                     )
                     raise BackendCannotProceed("discard_test_case")
+
+    def replay_choices(self, choices: Sequence[Any]) -> None:
+        """Enqueue a hypothesis-supplied choice sequence for concrete replay.
+
+        Hypothesis calls this to let us warm-start CrossHair with a corpus
+        of high-coverage inputs (for example, ones discovered previously by
+        HypoFuzz). Each enqueued sequence is consumed by the next call to
+        ``per_test_case_context_manager``, which replays it as concrete draws
+        rather than generating a test case from scratch.
+        """
+        # Store reversed so draw methods can pop from the end in draw order,
+        # matching the existing doublecheck replay protocol.
+        self._replay_queue.append(list(reversed(choices)))
 
     def observe_test_case(self) -> Dict[str, Any]:
         """Called at the end of the test case when observability mode is active.

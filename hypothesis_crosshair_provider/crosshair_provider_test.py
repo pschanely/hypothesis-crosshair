@@ -137,6 +137,59 @@ def test_provider_conformance_crosshair():
     )
 
 
+def test_replay_choices_feeds_concrete_values():
+    provider = CrossHairPrimitiveProvider()
+    provider.replay_choices((True, 7, 1.5, "hi", b"ab"))
+    with provider.per_test_case_context_manager():
+        s_bool = provider.draw_boolean()
+        s_int = provider.draw_integer()
+        s_float = provider.draw_float()
+        s_str = provider.draw_string(IntervalSet.from_string("abcdefghijklmnop"))
+        s_bytes = provider.draw_bytes(1, 2)
+    assert (s_bool, s_int, s_float, s_str, s_bytes) == (True, 7, 1.5, "hi", b"ab")
+    # The queue should be drained after one replay.
+    assert provider._replay_queue == []
+
+
+def test_replay_choices_surfaces_exceptions():
+    provider = CrossHairPrimitiveProvider()
+    provider.replay_choices((424242,))
+    with pytest.raises(TargetException):
+        with provider.per_test_case_context_manager():
+            if provider.draw_integer() == 424242:
+                raise TargetException
+
+
+def test_replay_choices_multiple_then_symbolic():
+    provider = CrossHairPrimitiveProvider()
+    provider.replay_choices((11,))
+    provider.replay_choices((22,))
+
+    replayed = []
+    # Drain both warm-start inputs.
+    for _ in range(2):
+        with provider.per_test_case_context_manager():
+            replayed.append(provider.draw_integer())
+    assert replayed == [11, 22]
+    assert provider._replay_queue == []
+
+    # The next iteration must fall through to symbolic exploration rather
+    # than another replay, so realize() should yield a concrete integer.
+    with provider.per_test_case_context_manager():
+        s_int = provider.draw_integer()
+    assert type(provider.realize(s_int)) is int
+
+
+def test_replay_choices_type_mismatch_is_discarded():
+    provider = CrossHairPrimitiveProvider()
+    # Enqueue a string where the test will draw an integer - this should be
+    # rejected rather than corrupting the run.
+    provider.replay_choices(("not-an-int",))
+    with pytest.raises(BackendCannotProceed):
+        with provider.per_test_case_context_manager():
+            provider.draw_integer()
+
+
 @patch("crosshair.statespace.solver_is_sat", side_effect=UnknownSatisfiability)
 def test_unsat_during_realization(solver_is_sat_mock):
     provider = CrossHairPrimitiveProvider()

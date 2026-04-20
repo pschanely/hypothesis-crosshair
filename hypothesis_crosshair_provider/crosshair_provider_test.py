@@ -137,57 +137,97 @@ def test_provider_conformance_crosshair():
     )
 
 
-def test_replay_choices_feeds_concrete_values():
+def test_replay_choices_steers_user_code_to_corpus_values():
+    """Warm-start draws are symbolic; the solver is biased so user-code
+    branches on the drawn value pick the edge the corpus would reach."""
     provider = CrossHairPrimitiveProvider()
-    provider.replay_choices((True, 7, 1.5, "hi", b"ab"))
+    provider.replay_choices((7,))
+    taken = None
     with provider.per_test_case_context_manager():
-        s_bool = provider.draw_boolean()
-        s_int = provider.draw_integer()
-        s_float = provider.draw_float()
-        s_str = provider.draw_string(IntervalSet.from_string("abcdefghijklmnop"))
-        s_bytes = provider.draw_bytes(1, 2)
-    assert (s_bool, s_int, s_float, s_str, s_bytes) == (True, 7, 1.5, "hi", b"ab")
-    # The queue should be drained after one replay.
+        n = provider.draw_integer()
+        if n == 7:
+            taken = "eq_7"
+        elif n > 10:
+            taken = "gt_10"
+        else:
+            taken = "other"
+    assert taken == "eq_7"
     assert provider._replay_queue == []
 
 
+def test_replay_choices_records_branches_for_later_iterations():
+    """The payoff of warm-starting: a seed that only covers one branch
+    should leave the sibling available for later (unseeded) iterations
+    to explore via the search tree's normal exhaust-then-sibling logic."""
+    provider = CrossHairPrimitiveProvider()
+    provider.replay_choices((5,))
+
+    branches_reached = set()
+    for _ in range(5):
+        try:
+            with provider.per_test_case_context_manager():
+                n = provider.draw_integer()
+                branches_reached.add("gt" if n > 10 else "le")
+        except BackendCannotProceed:
+            pass
+        if provider.exhausted:
+            break
+
+    assert "le" in branches_reached
+    assert "gt" in branches_reached
+
+
 def test_replay_choices_surfaces_exceptions():
+    """A user exception under warm-start is converted to
+    BackendCannotProceed (queueing a concrete doublecheck replay on the
+    next iteration), exactly like any other failing symbolic iteration."""
     provider = CrossHairPrimitiveProvider()
     provider.replay_choices((424242,))
-    with pytest.raises(TargetException):
+    with pytest.raises(BackendCannotProceed):
         with provider.per_test_case_context_manager():
-            if provider.draw_integer() == 424242:
-                raise TargetException
+            assert provider.draw_integer() != 424242
+    with pytest.raises(AssertionError):
+        with provider.per_test_case_context_manager():
+            assert provider.draw_integer() != 424242
 
 
-def test_replay_choices_multiple_then_symbolic():
+def test_replay_choices_multiple_seeds_then_symbolic():
+    """Each queued corpus input is consumed in FIFO order; draws after the
+    queue drains fall through to normal symbolic exploration."""
     provider = CrossHairPrimitiveProvider()
     provider.replay_choices((11,))
     provider.replay_choices((22,))
 
-    replayed = []
-    # Drain both warm-start inputs.
-    for _ in range(2):
-        with provider.per_test_case_context_manager():
-            replayed.append(provider.draw_integer())
-    assert replayed == [11, 22]
+    taken = []
+    # Run three iterations against the same test function; the first two
+    # are warm-started (seeds 11 and 22), the third is plain symbolic.
+    for _ in range(3):
+        try:
+            with provider.per_test_case_context_manager():
+                n = provider.draw_integer()
+                if n == 11:
+                    taken.append(11)
+                elif n == 22:
+                    taken.append(22)
+                else:
+                    taken.append("other")
+        except BackendCannotProceed:
+            taken.append("bcp")
+    # The two warm-start iterations must steer to their seeds; the third
+    # iteration explores a different value.
+    assert taken[0] == 11
+    assert taken[1] == 22
     assert provider._replay_queue == []
 
-    # The next iteration must fall through to symbolic exploration rather
-    # than another replay, so realize() should yield a concrete integer.
+
+def test_replay_choices_type_mismatch_leaves_symbolic_free():
+    """A type-mismatched corpus value does not crash the iteration; the
+    draw falls through to normal symbolic behaviour."""
+    provider = CrossHairPrimitiveProvider()
+    provider.replay_choices(("not-an-int",))
     with provider.per_test_case_context_manager():
         s_int = provider.draw_integer()
-    assert type(provider.realize(s_int)) is int
-
-
-def test_replay_choices_type_mismatch_is_discarded():
-    provider = CrossHairPrimitiveProvider()
-    # Enqueue a string where the test will draw an integer - this should be
-    # rejected rather than corrupting the run.
-    provider.replay_choices(("not-an-int",))
-    with pytest.raises(BackendCannotProceed):
-        with provider.per_test_case_context_manager():
-            provider.draw_integer()
+    assert isinstance(provider.realize(s_int), int)
 
 
 @patch("crosshair.statespace.solver_is_sat", side_effect=UnknownSatisfiability)

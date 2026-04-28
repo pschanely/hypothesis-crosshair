@@ -27,9 +27,11 @@ from crosshair.core import (
     get_current_parser,
     is_tracing,
     proxy_for_type,
+    smt_for_unification,
     suspected_proxy_intolerance_exception,
 )
 from crosshair.libimpl.builtinslib import LazyIntSymbolicStr, SymbolicBoundedIntTuple
+from crosshair.pathing_oracle import ConstrainedOracle
 from crosshair.statespace import optional_context_statespace, prefer_true
 from crosshair.util import CrossHairInternal, NotDeterministic, ch_stack, set_debug
 from hypothesis import settings
@@ -78,6 +80,8 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
         self.iteration_number = 0
         self.current_exit_stack: Optional[ExitStack] = None
         self.search_root = RootNode()
+        self.constrained_oracle = ConstrainedOracle(self.search_root.pathing_oracle)
+        self.search_root.pathing_oracle = self.constrained_oracle
         self.covering = True
         if len(os.environ.get("DEBUG_CROSSHAIR", "")) > 0:
             self.debug_to_stderr = os.environ["DEBUG_CROSSHAIR"].lower() not in (
@@ -90,6 +94,7 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
         self.exhausted = False
         self.doublecheck_inputs: Optional[List] = None
         self._replay_queue: List[List[Any]] = []
+        self._choice_hints_queue: List[Any] = []
         self.span_tracker = SpanTracker()
 
     @contextmanager
@@ -169,6 +174,8 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
         self.bubble_status()
         self.iteration_number += 1
         self.span_tracker = SpanTracker()
+        self.constrained_oracle.exprs = []
+        self._choice_hints_queue = []
         debug("starting iteration", self.iteration_number)
         self._hypothesis_draws = []  # keep a log of drawn values
         if self.doublecheck_inputs is not None:
@@ -202,8 +209,7 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
             # still-unvisited siblings.
             corpus = self._replay_queue.pop(0)
             debug("Warm-starting iteration with corpus input: ", corpus)
-            space.set_choice_hints(corpus)
-
+            self._choice_hints_queue = list(corpus)
         try:
             with (
                 condition_parser([]),
@@ -281,6 +287,17 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
             probability_true=probability,
         )
 
+    def _apply_next_hint(self, symbolic):
+        if self._choice_hints_queue:
+            value = self._choice_hints_queue.pop()
+            eq_smt = smt_for_unification(symbolic, value)
+            if eq_smt is None:
+                debug(
+                    f"WARNING: warm-start divergence; could not SMT-assign {repr(value)} to symbolic of type {type(symbolic)}"
+                )
+            else:
+                self.constrained_oracle.exprs.append(eq_smt)
+
     def draw_boolean(
         self,
         p: float = 0.5,
@@ -300,7 +317,7 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                 symbolic = proxy_for_type(
                     bool, self._next_name("bool"), allow_subtypes=False
                 )
-                context_statespace().apply_next_hint(symbolic)
+                self._apply_next_hint(symbolic)
                 span_depth = self.span_tracker.depth()
                 if span_depth >= 4:
                     self._bias_towards_value(
@@ -331,7 +348,7 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                 symbolic = proxy_for_type(
                     int, self._next_name("int"), allow_subtypes=False
                 )
-                context_statespace().apply_next_hint(symbolic)
+                self._apply_next_hint(symbolic)
                 span_depth = self.span_tracker.depth()
                 if span_depth >= 4:
                     self._bias_towards_value(
@@ -375,7 +392,7 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                 symbolic = proxy_for_type(
                     float, self._next_name("float"), allow_subtypes=False
                 )
-                context_statespace().apply_next_hint(symbolic)
+                self._apply_next_hint(symbolic)
             else:
                 return self._replayed_draw(float)
         if math.isnan(symbolic):
@@ -429,7 +446,7 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                             list(intervals.intervals), self._next_name("str")
                         )
                     )  # type: ignore
-                    context_statespace().apply_next_hint(symbolic)
+                    self._apply_next_hint(symbolic)
                 else:
                     symbolic = ""  # (no valid characters)
             else:
@@ -461,7 +478,7 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                 symbolic = proxy_for_type(
                     bytes, self._next_name("bytes"), allow_subtypes=False
                 )
-                context_statespace().apply_next_hint(symbolic)
+                self._apply_next_hint(symbolic)
             else:
                 return self._replayed_draw(bytes)
         mylen = len(symbolic)

@@ -59,10 +59,10 @@ pytest . --hypothesis-profile=crosshair
 * Implement the `replay_choices` provider hook, letting Hypothesis warm-start
   CrossHair with high-coverage choice sequences (for example, a corpus found
   by [HypoFuzz](https://hypofuzz.com/)). Each enqueued sequence is handed to
-  CrossHair's new `StateSpace.set_choice_hints` API, biasing the solver so
+  CrossHair's new `smt_for_unification` API, biasing the solver so
   that user-code branches taken under the seed are recorded in the search
   tree; follow-up (unseeded) iterations then explore the sibling branches
-  the seed left unvisited. Requires `crosshair-tool>=0.0.103`.
+  the seed left unvisited. 
   (fixes [#26](https://github.com/pschanely/hypothesis-crosshair/issues/26))
 
 ### 0.0.27

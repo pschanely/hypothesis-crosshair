@@ -56,6 +56,9 @@ pytest . --hypothesis-profile=crosshair
 ## Changelog
 
 ### Next Version
+* Nothing yet!
+
+### 0.0.28
 * Implement the `replay_choices` provider hook, letting Hypothesis warm-start
   CrossHair with high-coverage choice sequences (for example, a corpus found
   by [HypoFuzz](https://hypofuzz.com/)). Each enqueued sequence is handed to

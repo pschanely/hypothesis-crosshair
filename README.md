@@ -15,7 +15,7 @@ pip install hypothesis-crosshair
 
 and then add a backend="crosshair" setting, like so:
 
-```
+```python
 from hypothesis import given, settings, strategies as st
 
 @settings(backend="crosshair")
@@ -38,7 +38,7 @@ Yes! Create or edit your pytest
 [conftest.py](https://docs.pytest.org/en/7.1.x/reference/fixtures.html#conftest-py-sharing-fixtures-across-multiple-files)
 file to register a profile like the following:
 
-```
+```python
 from hypothesis import settings
 
 settings.register_profile(

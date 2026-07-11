@@ -5,7 +5,7 @@ import sys
 from collections import defaultdict
 from contextlib import ExitStack, contextmanager
 from io import StringIO
-from time import monotonic
+from time import process_time
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Type, TypeVar, Union
 
 import crosshair.core_and_libs  # Needed for patch registrations
@@ -117,7 +117,9 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
             hypothesis_deadline.total_seconds() * 2 if hypothesis_deadline else 2.5
         )
         space = StateSpace(
-            execution_deadline=monotonic() + per_path_timeout,
+            # StateSpace.check_timeout() compares against time.process_time()
+            # (CrossHair 0.0.106+); the deadline must be in the same units.
+            execution_deadline=process_time() + per_path_timeout,
             model_check_timeout=per_path_timeout / 2,
             search_root=self.search_root,
         )

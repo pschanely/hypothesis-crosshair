@@ -58,6 +58,9 @@ pytest . --hypothesis-profile=crosshair
 ### Next Version
 * Nothing yet!
 
+* Fix a mismatch in time units used by CrossHair >= 0.0.106 and the plugin.
+  Re-aligned and set minimum CrossHair version to 0.0.106.
+
 ### 0.0.28
 * Implement the `replay_choices` provider hook, letting Hypothesis warm-start
   CrossHair with high-coverage choice sequences (for example, a corpus found

@@ -58,6 +58,7 @@ pytest . --hypothesis-profile=crosshair
 ### Next Version
 * Nothing yet!
 
+### 0.0.29
 * Fix a mismatch in time units used by CrossHair >= 0.0.106 and the plugin.
   Re-aligned and set minimum CrossHair version to 0.0.106.
 

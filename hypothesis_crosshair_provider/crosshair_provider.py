@@ -41,11 +41,7 @@ from crosshair.util import (
     set_debug,
 )
 from hypothesis import settings
-from hypothesis.errors import (
-    BackendCannotProceed,
-    HypothesisException,
-    InvalidArgument,
-)
+from hypothesis.errors import BackendCannotProceed, HypothesisException, InvalidArgument
 from hypothesis.internal.conjecture.data import PrimitiveProvider
 from hypothesis.internal.intervalsets import IntervalSet
 from hypothesis.internal.observability import observability_enabled

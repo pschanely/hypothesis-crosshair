@@ -148,6 +148,21 @@ def test_datetimes_can_generate_in_few_iterations():
         f()
 
 
+def test_nonrepresentable_float_bound_is_not_reported_as_invalid_argument():
+    # Regression for https://github.com/pschanely/CrossHair/issues/491:
+    # a real-approximated symbolic float can realize to a value with no exact
+    # IEEE-double representation. Feeding it to st.floats(width=64) used to leak
+    # a spurious InvalidArgument out of the provider. Here (n + 1) / n is such a
+    # value for every n in range (1 + 1/n rounds to 1.0, but is not equal to it).
+    @settings(backend="crosshair", max_examples=5, deadline=None)
+    @given(st.integers(min_value=10**20, max_value=10**21))
+    def hypothesis_test(n):
+        x = (n + 1) / n
+        st.floats(min_value=x, width=64)
+
+    hypothesis_test()
+
+
 def test_incomplete_exhaustion_does_not_claim_verified():
     @given(st.integers())
     @settings(backend="crosshair", deadline=None, max_examples=10)

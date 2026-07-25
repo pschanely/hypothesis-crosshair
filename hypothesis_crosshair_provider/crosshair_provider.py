@@ -33,9 +33,19 @@ from crosshair.core import (
 from crosshair.libimpl.builtinslib import LazyIntSymbolicStr, SymbolicBoundedIntTuple
 from crosshair.pathing_oracle import ConstrainedOracle
 from crosshair.statespace import optional_context_statespace, prefer_true
-from crosshair.util import CrossHairInternal, NotDeterministic, ch_stack, set_debug
+from crosshair.util import (
+    CrossHairInternal,
+    CrossHairValue,
+    NotDeterministic,
+    ch_stack,
+    set_debug,
+)
 from hypothesis import settings
-from hypothesis.errors import BackendCannotProceed, HypothesisException
+from hypothesis.errors import (
+    BackendCannotProceed,
+    HypothesisException,
+    InvalidArgument,
+)
 from hypothesis.internal.conjecture.data import PrimitiveProvider
 from hypothesis.internal.intervalsets import IntervalSet
 from hypothesis.internal.observability import observability_enabled
@@ -248,6 +258,23 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
             }.get(exc_name, exc_name)
             self.set_completion(f"ignored due to {completion_text}")
             raise BackendCannotProceed("discard_test_case") from exc
+        except InvalidArgument as exc:
+            drew_symbolic = any(
+                isinstance(drawn, CrossHairValue) for drawn in self._hypothesis_draws
+            )
+            if drew_symbolic and "cannot be exactly represented as a float" in str(exc):
+                # A real-approximated symbolic float realized to a value with no
+                # exact IEEE-double representation, tripping st.floats() bound
+                # validation (pschanely/CrossHair#491). Verify against a concrete
+                # replay instead of forwarding: a representable realization then
+                # passes validation, while a genuinely non-representable bound
+                # re-raises on replay.
+                self.handle_user_exception(exc)
+            else:
+                self.set_completion(
+                    f"forwarded hypothesis {type(exc).__name__} exception"
+                )
+                raise
         except HypothesisException as exc:
             self.set_completion(f"forwarded hypothesis {type(exc).__name__} exception")
             raise

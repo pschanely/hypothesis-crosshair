@@ -58,6 +58,11 @@ pytest . --hypothesis-profile=crosshair
 ### Next Version
 * Nothing yet!
 
+### 0.0.30
+* Avoid a spurious InvalidArgument error from hypothesis when CrossHair
+  is generating imprecise symbolic floats. See details in
+  [this issue](https://github.com/pschanely/CrossHair/issues/491).
+
 ### 0.0.29
 * Fix a mismatch in time units used by CrossHair >= 0.0.106 and the plugin.
   Re-aligned and set minimum CrossHair version to 0.0.106.

@@ -77,9 +77,18 @@ class Pipeline:
         started = time.monotonic()
         report = PipelineReport(project_dir=self.runner.project_dir)
 
-        report.collected = (
-            list(nodeids) if nodeids else self.runner.collect(self.crosshair_env)
+        if self.validation_env is not None:
+            check = self.validator.preflight(self.validation_env)
+            report.clean_room = check.detail
+            if not check.clean:
+                raise RuntimeError(
+                    "the validation environment is not a clean room: " + check.detail
+                )
+
+        inventory = self.runner.collect(
+            self.crosshair_env, extra_args=self.config.pytest_args
         )
+        report.collected = select(inventory, nodeids) if nodeids else inventory
         if not report.collected:
             report.duration = time.monotonic() - started
             return report

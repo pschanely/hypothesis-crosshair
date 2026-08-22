@@ -161,6 +161,13 @@ Two gotchas that will otherwise corrupt the differential:
   previously-found failures and will make both arms "find" a bug that neither
   actually searched for. `database=None` in every arm.
 
+- **Cut off ancestor pytest configuration.** pytest walks upward for both its
+  ini file and its `conftest.py` files. A checked-out project therefore inherits
+  collection hooks and settings from whatever happens to sit above it in the
+  harness's own directory tree, which can silently deselect the entire suite.
+  Pass `--confcutdir` at the project root, and supply an empty `-c` when the
+  project has no config of its own.
+
 Also pin `PYTHONHASHSEED`, and record the interpreter version — CrossHair
 support varies across Python versions and a version-specific failure is itself a
 useful Goal-2 datapoint.
@@ -271,13 +278,21 @@ the argument for tracking it continuously rather than waiting for a user report.
 the *user's* code is nondeterministic — time, hashing, iteration order, ambient
 state — not that CrossHair misbehaved. The default action is to quarantine that
 test and stop spending budget on it; a nondeterministic test can never produce a
-trustworthy trophy anyway, since stage `V` will not reproduce reliably. Promote it
-to a CrossHair bug report only when the test is independently established as
-deterministic, which the three-seed baseline gate already provides evidence for:
-a test that passed three baseline runs identically and then reports
-nondeterminism under CrossHair is a genuine suspect. Track the per-project rate —
-a project whose suite is broadly nondeterministic should be dropped from the
-corpus entirely.
+trustworthy trophy anyway, since stage `V` will not reproduce reliably.
+
+Crucially, **CrossHair's determinism check is deep**, and the baseline gate
+cannot substitute for it. An internal memoization cache, an interned value, a
+lazily-populated lookup table — anything whose second execution differs from its
+first, even where observable behavior is identical — is enough to trip it. Such
+code passes three identical baseline runs and still reports nondeterminism, so
+"stable at baseline" is evidence of *observable* determinism only and must never
+be used to promote a nondeterminism report into a CrossHair defect. Ordinary
+well-behaved libraries cache things; expect a nonzero rate everywhere and treat
+it as a routine cost of doing business.
+
+Track the per-project rate: a project whose suite is broadly nondeterministic
+should leave the corpus. Escalate an individual case only on manual inspection,
+never automatically.
 
 **Productivity metric.** Define productive = fraction of crosshair-phase
 iterations completing as `completed normally` or `raised ...`. If a test spends
@@ -338,8 +353,26 @@ tracker for the exception and symbol, and check whether the test is already
 marked `xfail`.
 
 Every promoted trophy ships with a standalone reproduction: pinned versions,
-plain `hypothesis`, no CrossHair, the falsifying input as an `@example(...)`.
+plain `hypothesis`, no CrossHair, the falsifying input applied explicitly.
 If that file does not fail on a clean machine, there is no trophy.
+
+**Replay the example explicitly; do not lean on the example database.** Two
+things make the database the wrong mechanism for stage `V`. Passing
+`--hypothesis-seed` — which the baseline arm needs for reproducibility across
+seeds — *disables the database entirely*, so a seeded run saves nothing and the
+replay silently degrades into a fresh random search that finds nothing and
+"refutes" a real bug. And a saved choice sequence is a low-level encoding whose
+meaning depends on the Hypothesis version decoding it, which is a fragile
+assumption across two separate environments. Calling the test's undecorated body
+with the reported arguments avoids both problems and is self-evidencing: either
+the example was applied or it was not.
+
+**An inconclusive replay must never refute a finding.** If the replay could not
+run — import failure, signature mismatch, unusable example text — the verdict is
+*pending*, never *false positive*. This is the single most dangerous direction
+for the classifier to be wrong in, because it discards real bugs silently and
+leaves no trace to audit. Any validation step must produce positive evidence
+that it exercised the reported example before its answer is allowed to count.
 
 **Trophy record schema.** Project, commit, test id, the property in one line,
 falsifying input, exception, upstream issue link, validation status, coverage
@@ -421,6 +454,8 @@ previous stage's process to still be alive.
 
 Deliberately sequenced so the loop is producing Goal-2 value long before it is
 trustworthy enough to talk to strangers.
+
+Stages 1-3 are implemented in [`tools/discovery/`](../tools/discovery/).
 
 1. Sandbox + install + collect + baseline gate, on a hand-picked list of ten
    good-fit projects. No agent yet.

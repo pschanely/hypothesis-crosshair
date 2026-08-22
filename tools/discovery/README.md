@@ -68,11 +68,13 @@ profile-based approach would run the default backend while recording the result
 as CrossHair's. The injected plugin rewrites the settings object during
 collection instead, and records which node ids it actually forced.
 
-**`--hypothesis-seed` disables the example database.** Only the baseline arm is
-seeded. Validation therefore replays the reported example explicitly against
-the test's undecorated body rather than relying on a saved choice sequence,
-which also keeps the check independent of Hypothesis internals matching across
-two environments.
+**`--hypothesis-seed` disables the example database.** Every arm is seeded —
+the baseline for cross-seed stability, and both solver tiers with the *same*
+seed so that a tier A/B disagreement is attributable to observability rather
+than to a different search. Since seeding rules the database out, validation
+replays the reported example explicitly against the test's undecorated body
+rather than relying on a saved choice sequence, which also keeps the check
+independent of Hypothesis internals matching across two environments.
 
 **Ancestor pytest config is cut off.** pytest walks upward for both its ini file
 and its conftest files, so runs pass `--confcutdir`, and a project with no

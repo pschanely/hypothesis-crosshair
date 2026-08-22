@@ -47,6 +47,7 @@ class Verdict(str, enum.Enum):
     OBSERVER_EFFECT = "observer_effect"
     PENDING_VALIDATION = "pending_validation"
     PRE_EXISTING_FAILURE = "pre_existing_failure"
+    NO_BASELINE_RESULT = "no_baseline_result"
 
 
 #: Verdicts that must never be reported without a human reading them first.

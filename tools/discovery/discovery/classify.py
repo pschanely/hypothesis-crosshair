@@ -22,6 +22,7 @@ class Stability(str, enum.Enum):
     STABLE_PASS = "stable_pass"
     STABLE_FAIL = "stable_fail"
     UNSTABLE = "unstable"
+    NO_RESULT = "no_result"
 
 
 @dataclass
@@ -43,7 +44,9 @@ def baseline_gate(
     verdicts: Dict[str, BaselineVerdict] = {}
     for nodeid in nodeids:
         outcomes = [run.outcome_of(nodeid) for run in runs]
-        if all(o is Outcome.PASSED for o in outcomes):
+        if all(o in (Outcome.NOT_RUN, Outcome.SKIPPED) for o in outcomes):
+            stability = Stability.NO_RESULT
+        elif all(o is Outcome.PASSED for o in outcomes):
             stability = Stability.STABLE_PASS
         elif all(o is Outcome.FAILED for o in outcomes):
             stability = Stability.STABLE_FAIL
@@ -87,6 +90,11 @@ def classify(
         result.rationale = (
             f"CrossHair arm exited abnormally (rc={crosshair_run.returncode})"
         )
+        return result
+
+    if baseline.stability is Stability.NO_RESULT:
+        result.verdict = Verdict.NO_BASELINE_RESULT
+        result.rationale = "the baseline arm never produced a result for this test"
         return result
 
     if baseline.stability is Stability.UNSTABLE:

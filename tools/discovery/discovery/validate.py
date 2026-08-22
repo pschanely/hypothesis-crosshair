@@ -65,6 +65,31 @@ with open({out!r}, "w") as handle:
 '''
 
 
+_PREFLIGHT = """
+import json, sys
+report = {}
+try:
+    import importlib.util
+    report["plugin_importable"] = importlib.util.find_spec(
+        "hypothesis_crosshair_provider") is not None
+except Exception as exc:
+    report["plugin_importable"] = "unknown: %r" % (exc,)
+try:
+    from hypothesis import settings
+    settings(backend="crosshair")
+    report["backend_available"] = True
+except Exception:
+    report["backend_available"] = False
+print(json.dumps(report))
+"""
+
+
+@dataclass
+class CleanRoomCheck:
+    clean: bool
+    detail: str
+
+
 @dataclass
 class ValidationResult:
     nodeid: str
@@ -174,6 +199,34 @@ class Validator:
                 exception_type=entry.get("exception_type"),
             )
         return results
+
+    def preflight(self, env: EnvSpec) -> CleanRoomCheck:
+        """Confirm the validation environment cannot run CrossHair at all.
+
+        A clean room that is not actually clean would make every
+        ``crosshair_false_positive`` verdict untrustworthy, so this is checked
+        rather than assumed. Note that the working directory participates in
+        import resolution, so this runs where validation will run.
+        """
+        result = self.sandbox.run(
+            [*env.python_argv, "-c", _PREFLIGHT],
+            cwd=self.project_dir,
+            env={"PYTHONDONTWRITEBYTECODE": "1"},
+            network=False,
+            limits=Limits(wall_seconds=120),
+        )
+        try:
+            report = json.loads(result.stdout.strip().splitlines()[-1])
+        except (ValueError, IndexError):
+            return CleanRoomCheck(
+                False, f"preflight did not report: {result.stderr[-500:]}"
+            )
+        if (
+            report.get("backend_available")
+            or report.get("plugin_importable") is not False
+        ):
+            return CleanRoomCheck(False, f"CrossHair is reachable there: {report}")
+        return CleanRoomCheck(True, "CrossHair is not reachable")
 
     def repro_script_path(self) -> str:
         return os.path.join(self.run_root, "repro.py")

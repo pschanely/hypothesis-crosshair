@@ -7,7 +7,7 @@ import shlex
 import sys
 import time
 import uuid
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from .model import Verdict
 from .pipeline import Pipeline, PipelineConfig, PipelineReport
@@ -27,6 +27,7 @@ _HEADLINE_ORDER = [
     Verdict.SHARED_FIND,
     Verdict.QUARANTINED_NONDETERMINISTIC,
     Verdict.QUARANTINED_UNSTABLE,
+    Verdict.NO_BASELINE_RESULT,
     Verdict.NO_SIGNAL,
 ]
 
@@ -64,6 +65,7 @@ def _format(report: PipelineReport) -> str:
                 first = item.falsifying_example.replace("\n", " ")
                 lines.append(f"        example: {first[:110]}")
         lines.append("")
+    lines.extend(_telemetry_section(report))
     if any(c.verdict is Verdict.PENDING_VALIDATION for c in report.classifications):
         lines.append(
             "NOTE: pending_validation means the clean-room replay was inconclusive, "
@@ -75,6 +77,36 @@ def _format(report: PipelineReport) -> str:
             "reports anything to a third-party project."
         )
     return "\n".join(lines)
+
+
+def _telemetry_section(report: PipelineReport) -> List[str]:
+    """Aggregate solver health across the run.
+
+    The ignore-reason histogram is the CrossHair-facing output: it says where
+    the solver spent a corpus's worth of budget without exploring user code.
+    """
+    stats = (report.telemetry_run.telemetry if report.telemetry_run else {}) or {}
+    totals: Dict[str, int] = {}
+    cases = 0
+    productive = 0
+    for entry in stats.values():
+        cases += entry.crosshair_cases
+        productive += entry.productive
+        for text, count in entry.counts.items():
+            totals[text] = totals.get(text, 0) + count
+    if not cases:
+        return []
+    lines = ["solver health (tier B telemetry)"]
+    lines.append(f"    {cases} solver iterations, {productive / cases:.0%} productive")
+    for text, count in sorted(totals.items(), key=lambda kv: -kv[1]):
+        lines.append(f"    {count:6d}  {count / cases:5.1%}  {text}")
+    covered = sum(
+        len(v) for entry in stats.values() for v in entry.covered_lines.values()
+    )
+    if covered:
+        lines.append(f"    {covered} distinct lines covered across the run")
+    lines.append("")
+    return lines
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -108,6 +140,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--crosshair-max-examples", type=int, default=100)
     parser.add_argument("--crosshair-timeout", type=int, default=900)
     parser.add_argument("--no-telemetry-tier", action="store_true")
+    parser.add_argument(
+        "--pytest-arg",
+        action="append",
+        default=[],
+        help="extra argument passed to every pytest run, e.g. -m property. Repeatable.",
+    )
     parser.add_argument(
         "--store", default=None, help="sqlite path for durable verdicts"
     )
@@ -145,6 +183,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         crosshair_max_examples=args.crosshair_max_examples,
         crosshair_limits=Limits(wall_seconds=args.crosshair_timeout),
         run_telemetry_tier=not args.no_telemetry_tier,
+        pytest_args=tuple(args.pytest_arg),
     )
 
     pipeline = Pipeline(

@@ -3,7 +3,6 @@
 Deterministic end to end. No model is involved in any decision made here.
 """
 
-import os
 import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence
@@ -25,6 +24,7 @@ class PipelineConfig:
     baseline_limits: Limits = field(default_factory=lambda: Limits(wall_seconds=600))
     crosshair_limits: Limits = field(default_factory=lambda: Limits(wall_seconds=900))
     run_telemetry_tier: bool = True
+    pytest_args: Sequence[str] = ()
 
 
 @dataclass
@@ -38,6 +38,7 @@ class PipelineReport:
     crosshair_run: Optional[RunResult] = None
     telemetry_run: Optional[RunResult] = None
     validations: Dict[str, "ValidationResult"] = field(default_factory=dict)
+    clean_room: str = ""
     duration: float = 0.0
 
     def by_verdict(self, verdict: Verdict) -> List[Classification]:
@@ -178,6 +179,7 @@ class Pipeline:
                     backend="hypothesis",
                     max_examples=self.config.baseline_max_examples,
                     seed=seed,
+                    extra_args=self.config.pytest_args,
                     limits=self.config.baseline_limits,
                 )
             )
@@ -185,7 +187,11 @@ class Pipeline:
         ]
 
     def _crosshair(self, nodeids: Sequence[str], tier: Tier) -> RunResult:
-        database = os.path.join(self.runner.run_root, "crosshair-db")
+        """Run the solver arm.
+
+        Both tiers use the same seed so that an outcome disagreement between
+        them is attributable to observability rather than to a different search.
+        """
         return self.runner.run(
             RunSpec(
                 arm=Arm.CROSSHAIR,
@@ -194,11 +200,30 @@ class Pipeline:
                 nodeids=nodeids,
                 backend="crosshair",
                 max_examples=self.config.crosshair_max_examples,
+                extra_args=self.config.pytest_args,
                 seed=self.config.baseline_seeds[0],
-                database_dir=database if tier is Tier.A_VERDICT else None,
                 limits=self.config.crosshair_limits,
             )
         )
+
+
+def select(inventory: Sequence[str], selectors: Sequence[str]) -> List[str]:
+    """Resolve user-supplied selectors against collected node ids.
+
+    A selector may be a full node id or any path prefix of one, so that a file
+    or directory selects every Hypothesis test beneath it.
+    """
+    chosen = []
+    for nodeid in inventory:
+        for selector in selectors:
+            if (
+                nodeid == selector
+                or nodeid.startswith(selector.rstrip("/") + "/")
+                or (nodeid.startswith(selector) and selector.endswith(".py"))
+            ):
+                chosen.append(nodeid)
+                break
+    return chosen
 
 
 def _stats_for(stats_by_name: Dict[str, object], nodeid: str):

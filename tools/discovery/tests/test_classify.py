@@ -161,3 +161,12 @@ def test_needs_validation_only_when_crosshair_is_alone_in_failing():
     assert needs_validation(Outcome.PASSED, Outcome.FAILED)
     assert not needs_validation(Outcome.FAILED, Outcome.FAILED)
     assert not needs_validation(Outcome.PASSED, Outcome.PASSED)
+
+
+def test_a_test_that_never_ran_is_not_called_unstable():
+    verdict = classify(
+        NODE,
+        baseline=gate(Outcome.NOT_RUN, Outcome.NOT_RUN, Outcome.NOT_RUN),
+        crosshair_run=run(Outcome.NOT_RUN),
+    )
+    assert verdict.verdict is Verdict.NO_BASELINE_RESULT

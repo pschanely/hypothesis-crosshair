@@ -178,13 +178,19 @@ class Runner:
             result.telemetry = telemetry.load(paths["storage"])
         return result
 
-    def collect(self, env: EnvSpec, limits: Optional[Limits] = None) -> List[str]:
+    def collect(
+        self,
+        env: EnvSpec,
+        limits: Optional[Limits] = None,
+        extra_args: Sequence[str] = (),
+    ) -> List[str]:
         """Return the node ids of Hypothesis-driven tests in the project."""
         spec = RunSpec(
             arm=Arm.BASELINE,
             tier=Tier.A_VERDICT,
             env=env,
             collect_only=True,
+            extra_args=extra_args,
             limits=limits or Limits(),
         )
         paths = self._paths(spec)

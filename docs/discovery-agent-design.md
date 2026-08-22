@@ -21,7 +21,7 @@ For each candidate test `T` in project `P` at commit `C`, produce a triple:
 | --- | --- | --- |
 | **B** (baseline) | default `hypothesis` | What random search finds on its own |
 | **X** (crosshair) | `backend="crosshair"` | What the solver finds |
-| **V** (validation) | default, **fresh process, plugin not installed** | Does X's finding survive without CrossHair in the room? |
+| **V** (validation) | default, **fresh process, plugin not installed, no tracers** | Does X's finding survive without CrossHair in the room? |
 
 `V` is the trophy gate. CrossHair drives user code with symbolic proxies; a
 proxy that leaks or mis-realizes can produce a failure that does not exist in
@@ -31,6 +31,8 @@ repositories, which is the single worst outcome available to it.
 `V` must run in a process where `hypothesis-crosshair` is **not installed at
 all** — not merely unselected. The plugin registers an entry point and CrossHair
 patches builtins on import, so "same venv, different backend" is not a clean room.
+`V` also runs with observability off and no coverage tracer attached, for the
+reasons in section 5.
 
 ### Classification matrix
 
@@ -86,11 +88,18 @@ a moving target makes cached verdicts meaningless.
 Timeouts must escalate to `SIGKILL`: CrossHair installs a bytecode tracer and a
 wedged tracer may never service a `SIGTERM` handler.
 
-**Egress on the reporting side.** The loop never opens an issue on a third-party
-repository without human approval. It drafts and queues. An automated bug-report
-firehose burns maintainer goodwill and, with it, the credibility of the trophy
-list. Auto-filing into your *own* CrossHair and plugin trackers is acceptable,
-deduplicated.
+**Egress on the reporting side — a hard invariant.** The loop MUST NOT open an
+issue, pull request, or comment on any repository outside the CrossHair project's
+own. Not gated, not rate-limited: no automated write path to third-party
+repositories exists at all. The loop drafts and queues for human review, and a
+human posts. An automated bug-report firehose burns maintainer goodwill and, with
+it, the credibility of the trophy list. Auto-filing into your *own* CrossHair and
+plugin trackers is acceptable, deduplicated.
+
+Enforce this structurally rather than by policy: the sandbox holds no credentials
+(above), and the orchestrator's GitHub token should be scoped so that the
+third-party write path is impossible even if some future agent decides it would
+be helpful.
 
 **Detecting escapes.** Snapshot and diff the writable layer after each run.
 A suite that wrote outside its temp directory is both a safety signal and a
@@ -158,7 +167,64 @@ useful Goal-2 datapoint.
 
 ---
 
-## 5. Telemetry
+## 5. Telemetry, and the observer effect
+
+### Two-tier execution
+
+Observability mode perturbs CrossHair (measured below). Telemetry therefore
+never decides a verdict. Every test runs in two tiers:
+
+- **Tier A — verdict run.** No observability, no coverage tracer, nothing else
+  attached. Produces only pass/fail and the falsifying example. **All
+  classification in section 1 uses Tier A exclusively.**
+- **Tier B — telemetry run.** Observability on. Produces completion histograms,
+  SMT message trails, and coverage deltas. Used for steering, prioritization,
+  and Goal-2 mining — never as the sole basis of a published result.
+
+This split is what makes the concern manageable rather than fatal: the expensive,
+introspective run informs *what to work on next*, and the clean run decides *what
+is true*.
+
+**Divergence is itself a finding.** If Tier A and Tier B disagree on the outcome
+of the same test at the same seed, that is an observer-effect bug in CrossHair or
+the plugin — file it under Goal 2. The loop should therefore detect the exact
+failure mode that motivates the two-tier split, rather than merely tolerating it.
+
+### Measured observer effect
+
+Checked against the current plugin on Python 3.11, over nine properties
+constructed so that only a solver can satisfy them (magic constants, a narrow
+float window, structured strings, a `sum(map(ord, s))` checksum, `a*a == 1522756`
+conjoined with a modular constraint):
+
+- **Realization is real and visible.** Under observability the JSONL `arguments`
+  field holds *concrete* values (`{"x": 123456789}`) while `representation` still
+  reads `<symbolic>`. Draws are being realized to populate the observation.
+- **The search path does shift.** One property's witness changed between modes
+  (`a=1234` unobserved, `a=-1234` observed) — both valid, but the exploration
+  order genuinely differs.
+- **No capability loss observed.** All nine properties were solved in both modes,
+  including the marginal ones.
+- **Cost is material:** ~18s unobserved vs ~26s observed on the harder set,
+  roughly 40% overhead, on top of the ~16x over the default backend.
+
+So the risk is confirmed in mechanism but bounded in consequence *at the
+difficulty tested*. Treat that as a bound, not a guarantee: harder constraints
+than these are exactly where premature realization would first cost a finding,
+and the corpus will contain harder constraints than these. The two-tier split and
+the divergence check keep that from silently corrupting results.
+
+### Coverage and tracer interaction
+
+CrossHair installs a bytecode tracer, so any second tracer is a hazard. Running
+the same suite under `coverage run` on Python 3.11 showed no conflict — all
+findings survived, with and without observability, no crashes. **This is a
+single-version result.** Python 3.12+ moved coverage to `sys.monitoring`, a
+different mechanism entirely, and the loop tests across 3.9–3.14; re-verify per
+interpreter rather than generalizing from 3.11. Tier A carries no external tracer
+in any case, so a conflict degrades telemetry, never a verdict.
+
+### What Tier B collects
 
 Set `HYPOTHESIS_EXPERIMENTAL_OBSERVABILITY=1` and parse
 `.hypothesis/observed/*_testcases.jsonl`. Per test case this yields `status`,
@@ -192,7 +258,7 @@ CrossHair's own health. Aggregate them per test and per project:
 | `raised X exception` | User-code failure, concretely replayed | trophy candidate |
 | `raised X exception, but unable to realize for concrete replay` | Failure could not be made concrete | **realization bug** |
 | `ignored due to proxy intolerance` | Symbolic proxy leaked into user code | **fidelity gap** |
-| `ignored due to non determinism detected` | Replay diverged | **plugin/CrossHair bug** |
+| `ignored due to non determinism detected` | Usually nondeterminism in *user code* | **Quarantine the test** — not a CrossHair bug by default |
 | `ignored due to use of Python features not yet supported by CrossHair` | — | **coverage gap**; mine for roadmap |
 | `ignored due to path timeout` / `excessive solver costs` | — | **performance bug** |
 | `ignored due to lazily-detected path impossibility` | Normal pruning | healthy; high rates suggest over-constraining |
@@ -200,6 +266,18 @@ CrossHair's own health. Aggregate them per test and per project:
 
 The last row is exactly the class of defect that release 0.0.30 fixed, which is
 the argument for tracking it continuously rather than waiting for a user report.
+
+**Nondeterminism means skip, not bug.** `non determinism detected` usually means
+the *user's* code is nondeterministic — time, hashing, iteration order, ambient
+state — not that CrossHair misbehaved. The default action is to quarantine that
+test and stop spending budget on it; a nondeterministic test can never produce a
+trustworthy trophy anyway, since stage `V` will not reproduce reliably. Promote it
+to a CrossHair bug report only when the test is independently established as
+deterministic, which the three-seed baseline gate already provides evidence for:
+a test that passed three baseline runs identically and then reports
+nondeterminism under CrossHair is a genuine suspect. Track the per-project rate —
+a project whose suite is broadly nondeterministic should be dropped from the
+corpus entirely.
 
 **Productivity metric.** Define productive = fraction of crosshair-phase
 iterations completing as `completed normally` or `raised ...`. If a test spends
@@ -242,6 +320,10 @@ starts crashing, is a release blocker.
 known-solvable properties (a magic constant, a narrow float window, a structured
 string) where CrossHair is known to succeed. If the canary fails, the
 environment is broken; discard the batch rather than attributing its results.
+Run the canary in **both tiers** and compare: a canary that solves unobserved but
+fails observed is the observer-effect regression from section 5, and it should
+block the batch and file under Goal 2. The nine properties measured in section 5
+are a reasonable seed for this suite.
 A long-running autonomous loop without a canary eventually reports confident
 nonsense.
 
@@ -342,11 +424,12 @@ trustworthy enough to talk to strangers.
 
 1. Sandbox + install + collect + baseline gate, on a hand-picked list of ten
    good-fit projects. No agent yet.
-2. Telemetry parsing and the completion histogram. **This alone starts producing
-   Goal 2 findings immediately** — ignore-reason and crash aggregates need no
-   trophy validation and no human gate.
+2. Two-tier execution plus telemetry parsing and the completion histogram.
+   **This alone starts producing Goal 2 findings immediately** — ignore-reason
+   and crash aggregates need no trophy validation and no human gate.
 3. The differential classifier and stage `V`.
-4. Canary suite and the version-bump regression re-run.
+4. Canary suite (both tiers), the A/B divergence check, and the version-bump
+   regression re-run.
 5. Agent at the failure-triage point only — the highest leverage, and the easiest
    to evaluate against verdicts you already reviewed by hand.
 6. Agent at candidate triage and harness repair; scale the corpus up.

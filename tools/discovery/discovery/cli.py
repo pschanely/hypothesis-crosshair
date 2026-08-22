@@ -9,6 +9,7 @@ import time
 import uuid
 from typing import Dict, List, Optional
 
+from . import telemetry
 from .model import Verdict
 from .pipeline import Pipeline, PipelineConfig, PipelineReport
 from .runner import EnvSpec, Runner
@@ -100,6 +101,14 @@ def _telemetry_section(report: PipelineReport) -> List[str]:
     lines.append(f"    {cases} solver iterations, {productive / cases:.0%} productive")
     for text, count in sorted(totals.items(), key=lambda kv: -kv[1]):
         lines.append(f"    {count:6d}  {count / cases:5.1%}  {text}")
+    drift: Dict[str, int] = {}
+    for entry in stats.values():
+        for text, count in telemetry.api_drift_completions(entry).items():
+            drift[text] = drift.get(text, 0) + count
+    if drift:
+        lines.append("    possible API drift (excludes assume() filtering):")
+        for text, count in sorted(drift.items(), key=lambda kv: -kv[1]):
+            lines.append(f"        {count:6d}  {text}")
     covered = sum(
         len(v) for entry in stats.values() for v in entry.covered_lines.values()
     )

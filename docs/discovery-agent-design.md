@@ -269,10 +269,17 @@ CrossHair's own health. Aggregate them per test and per project:
 | `ignored due to use of Python features not yet supported by CrossHair` | — | **coverage gap**; mine for roadmap |
 | `ignored due to path timeout` / `excessive solver costs` | — | **performance bug** |
 | `ignored due to lazily-detected path impossibility` | Normal pruning | healthy; high rates suggest over-constraining |
-| `forwarded hypothesis X exception` | Provider leaked a Hypothesis error | **API drift** |
+| `forwarded hypothesis UnsatisfiedAssumption exception` | `assume()` rejected the input | healthy — ordinary filtering |
+| `forwarded hypothesis X exception` (any other) | Provider leaked a Hypothesis error | **API drift** |
 
 The last row is exactly the class of defect that release 0.0.30 fixed, which is
 the argument for tracking it continuously rather than waiting for a user report.
+
+**Exclude `UnsatisfiedAssumption` from that row.** `assume()` raises it to
+reject an input, so the provider forwards it on every filtered iteration of a
+perfectly healthy test — 1% of solver iterations on `pypa/packaging`'s version
+suite. Folding it in with genuine drift would flag most real projects, which is
+how a defect signal becomes noise and stops being read.
 
 **Nondeterminism means skip, not bug.** `non determinism detected` usually means
 the *user's* code is nondeterministic — time, hashing, iteration order, ambient

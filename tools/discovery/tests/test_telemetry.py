@@ -95,3 +95,33 @@ def test_load_reads_observability_files(tmp_path):
 
 def test_load_of_a_missing_directory_is_empty():
     assert telemetry.load("/nonexistent/path") == {}
+
+
+def test_assume_filtering_is_not_treated_as_api_drift():
+    """assume() raises UnsatisfiedAssumption on every rejected input.
+
+    Counting that as drift would flag most real projects: pypa/packaging's
+    version suite forwards it on 1% of solver iterations while being healthy.
+    """
+    stats = telemetry.aggregate(
+        [row("t", CH, "forwarded hypothesis UnsatisfiedAssumption exception")] * 46
+        + [row("t", CH, "completed normally")] * 4573
+    )["t"]
+    assert telemetry.api_drift_completions(stats) == {}
+    assert telemetry.is_benign("forwarded hypothesis UnsatisfiedAssumption exception")
+
+
+def test_other_forwarded_hypothesis_exceptions_are_reported_as_drift():
+    stats = telemetry.aggregate(
+        [row("t", CH, "forwarded hypothesis InvalidArgument exception")] * 3
+        + [row("t", CH, "forwarded hypothesis UnsatisfiedAssumption exception")]
+    )["t"]
+    assert telemetry.api_drift_completions(stats) == {
+        "forwarded hypothesis InvalidArgument exception": 3
+    }
+    assert not telemetry.is_benign("forwarded hypothesis InvalidArgument exception")
+
+
+def test_ignored_iterations_are_not_benign():
+    assert not telemetry.is_benign("ignored due to proxy intolerance")
+    assert telemetry.is_benign("raised AssertionError exception")

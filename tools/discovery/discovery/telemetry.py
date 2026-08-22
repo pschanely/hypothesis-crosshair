@@ -84,6 +84,40 @@ def coverage_delta(
     return delta
 
 
+#: Forwarded Hypothesis exceptions that are ordinary control flow, not drift.
+#: ``assume()`` raises UnsatisfiedAssumption to reject an input, so the
+#: provider forwards it on every filtered iteration of a perfectly healthy test.
+BENIGN_FORWARDED_EXCEPTIONS = frozenset({"UnsatisfiedAssumption"})
+
+_FORWARDED_PREFIX = "forwarded hypothesis "
+
+
+def api_drift_completions(stats: CompletionStats) -> Dict[str, int]:
+    """Forwarded Hypothesis exceptions that suggest the provider is out of step.
+
+    Excludes the benign ones: a test that filters its inputs is not evidence of
+    drift, and treating it as such would flag most real projects.
+    """
+    drift = {}
+    for text, count in stats.counts.items():
+        if not text.startswith(_FORWARDED_PREFIX):
+            continue
+        name = text[len(_FORWARDED_PREFIX) :].split(" ")[0]
+        if name not in BENIGN_FORWARDED_EXCEPTIONS:
+            drift[text] = count
+    return drift
+
+
+def is_benign(completion: str) -> bool:
+    """Whether a completion represents healthy behavior."""
+    if completion == "completed normally" or completion.startswith("raised "):
+        return True
+    if completion.startswith(_FORWARDED_PREFIX):
+        name = completion[len(_FORWARDED_PREFIX) :].split(" ")[0]
+        return name in BENIGN_FORWARDED_EXCEPTIONS
+    return False
+
+
 def nondeterminism_rate(stats: CompletionStats) -> float:
     """Share of solver iterations discarded for detected nondeterminism.
 

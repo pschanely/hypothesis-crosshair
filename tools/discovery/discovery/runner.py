@@ -23,6 +23,14 @@ _INTERNAL_ERROR_RE = re.compile(
 #: pytest's exit code for an internal error.
 _PYTEST_INTERNAL_ERROR = 3
 
+#: Collection exit codes that legitimately yield no Hypothesis tests.
+_CLEAN_COLLECT_CODES = (0, 5)
+
+
+class CollectionFailed(RuntimeError):
+    """Raised when the inventory cannot be trusted to be complete."""
+
+
 #: Files that make a directory the root of its own pytest configuration.
 _CONFIG_FILES = ("pytest.ini", "pyproject.toml", "tox.ini", "setup.cfg")
 
@@ -194,7 +202,7 @@ class Runner:
             limits=limits or Limits(),
         )
         paths = self._paths(spec)
-        self.sandbox.run(
+        result = self.sandbox.run(
             self.build_argv(spec),
             cwd=self.project_dir,
             env=self.build_env(spec, paths),
@@ -202,9 +210,18 @@ class Runner:
             limits=spec.limits,
         )
         if not os.path.exists(paths["report"]):
-            return []
+            raise CollectionFailed(
+                f"collection produced no report (rc={result.returncode}): "
+                f"{result.stderr[-2000:] or result.stdout[-2000:]}"
+            )
         with open(paths["report"]) as handle:
-            return list(json.load(handle).get("hypothesis_nodeids", []))
+            nodeids = list(json.load(handle).get("hypothesis_nodeids", []))
+        if not nodeids and result.returncode not in _CLEAN_COLLECT_CODES:
+            raise CollectionFailed(
+                f"collection failed (rc={result.returncode}): "
+                f"{result.stderr[-2000:] or result.stdout[-2000:]}"
+            )
+        return nodeids
 
 
 def _read_report(path: str) -> Dict[str, CaseOutcome]:

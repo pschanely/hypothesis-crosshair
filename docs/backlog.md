@@ -342,3 +342,62 @@ reliably carry the realized value's type or domain size.
 structured data, include the type or domain size so small-domain realization
 can be discounted. Until then treat the rate as a weak diagnostic rather than
 a gate, and do not demote a test on it alone.
+
+---
+
+## B16. The pathing oracle already counts solver progress
+
+**Area:** `hypothesis_crosshair_provider/crosshair_provider.py` ·
+**Kind:** telemetry, and a proposed provider option
+
+CrossHair's `max_uninteresting_iterations` is read only by `analyze_calltree`
+and `path_search` in `crosshair/core.py`. The provider never builds an
+`AnalysisOptions`, because the search loop here is Hypothesis's, so the option
+is not reachable from the plugin.
+
+The counter it gates on *is* reachable. The provider owns `self.search_root`,
+whose `CoveragePathingOracle` maintains `visits` (distinct code locations at
+which the solver forked) and `iters_since_discovery`. Both were confirmed live
+and incrementing under the provider by sampling them per iteration.
+
+This matters beyond throughput: `len(visits)` is solver-side coverage,
+computed inside CrossHair. It is the progress signal B14 says is unavailable
+through Hypothesis's tracer, which records `coverage: null` for every symbolic
+case. It is per-test, continuous, free, and unaffected by B15's small-domain
+problem, since realizing a value that opens no new branch does not increment
+it.
+
+**Measured, 300 iterations, `max_examples=300`:**
+
+| case | wall | code locs | plateau | mui=5 | mui=10 | mui=25 |
+| --- | --- | --- | --- | --- | --- | --- |
+| toy regex `^(?:v?)(\d+)(?:\.(\d+))?(?:\.(\d+))?$` | 314s | 43 | iter 49 | stop@19, 35/43 | stop@49, 43/43 | stop@64, 43/43 |
+| `packaging.Version(s)` | 15.9s | 9 | iter 9 | stop@9, 9/9 | stop@14, 9/9 | stop@29, 9/9 |
+| `a + b == b + a` | 0.3s | 0 | — | never fires (paths exhausted at iter 2) | | |
+
+Two readings. First, a threshold near 10-15 is right, and the cost is
+asymmetric: at 5 (CrossHair's default when unset) the crackable regex loses 8
+of 43 locations, while being generous costs `packaging` five extra iterations.
+An adaptive rule also removes the need to guess how many optional clauses a
+pattern holds — it stops once they stop being found.
+
+Second, and more useful for Goal 2: `packaging` reaches only 9 code locations
+and plateaus at iteration 9, against a `VERSION_PATTERN` of 1075 characters
+with 35 `?` quantifiers, 22 `+`, 10 alternations and 13 named groups. The
+solver is not reaching the optional clauses; it stalls at the doorway. The toy
+pattern, by contrast, sustains 43 locations at ~1s per iteration of real
+solver work. This is a sharper statement of B11 than the earlier bisection,
+and the first number attached to it.
+
+**Proposed change, two parts, deliberately separate:**
+
+1. Record `len(visits)` and `iters_since_discovery` per test as discovery-tool
+   telemetry. Contained to the agent; no provider behavior changes.
+2. Optionally let the provider stop a stalled search: when
+   `iters_since_discovery` exceeds a threshold, `set_completion(...)` and
+   raise `BackendCannotProceed("exhausted")`. Hypothesis's engine handles that
+   scope by setting `_switch_to_hypothesis_provider` (`engine.py:541`), so the
+   test spends its remaining budget on the concrete backend rather than
+   aborting — a stalled test still gets random examples, at a fraction of the
+   cost per example. This changes what a plain `backend="crosshair"` run does
+   and should be opt-in rather than default-on.

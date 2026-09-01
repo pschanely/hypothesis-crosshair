@@ -146,3 +146,66 @@ both tiers, the version-bump regression re-run that turns the verdict cache
 into a regression suite, and the agent decision points. Stage 4 is what makes
 the loop safe to leave running unattended — without a canary, a broken
 environment produces confident nonsense rather than an error.
+
+---
+
+## B8. The coverage-delta metric does not exist
+
+**Area:** `tools/discovery` · **Kind:** design feature present but inert
+
+`telemetry.coverage_delta()` is written and unit-tested, and nothing calls it.
+It cannot be called as things stand: it compares the baseline arm's covered
+lines against the solver arm's, but the baseline only ever runs in tier A,
+which has observability off and therefore produces no coverage data.
+
+The design leans on this metric twice — as the evidence behind a trophy's
+"random search does not reach here" claim, and as a cross-release regression
+signal. Neither is currently available. What the runs do produce is the solver
+arm's coverage alone (1157 lines on the version suite, 2589 on ranges), which
+says how much code was reached but not how much *more* than the baseline.
+
+**Proposed change:** run the baseline once in tier B as well. It is the cheap
+arm — roughly 2.8s versus 44s for the solver on comparable work — so the extra
+observability pass costs little. Then wire `coverage_delta` into the report.
+
+---
+
+## B9. The verdict cache is never read or written
+
+**Area:** `tools/discovery/store.py` · **Kind:** design feature present but inert
+
+`cache_key()`, `Store.cached()`, `Store.put_cache()` and the `cache` table are
+implemented and tested. No caller uses any of them. Every run therefore redoes
+work it has already done, and design §6's central claim — that invalidating the
+cache on a CrossHair or plugin version bump turns the re-run into the Goal-2
+regression suite — has no implementation behind it.
+
+Wiring it needs something the pipeline does not yet collect: the CrossHair,
+plugin, and Python versions actually in use in the solver environment, plus the
+project's commit SHA. `cache_key()` already takes exactly those five fields.
+
+**Proposed change:** capture the version tuple during the clean-room preflight
+(which already executes code in the target environments), then consult the
+cache before running a test and record the verdict after.
+
+---
+
+## B10. Add a check for defined-but-unreferenced helpers
+
+**Area:** `tools/discovery` · **Kind:** preventive
+
+Three separate defects in this work shared one shape: a function was written,
+unit-tested, and never called. `Validator.preflight` (the clean-room check),
+selector expansion, `coverage_delta`, and the verdict cache all passed their
+tests while doing nothing, because a unit test exercises a helper directly and
+proves nothing about whether the pipeline invokes it.
+
+Two of those were caught only by reading output that looked wrong. That is not
+a reliable detector.
+
+**Proposed change:** a test that walks the package and fails on a public
+module-level function with no call site outside its own tests — the audit that
+found B8 and B9, made permanent. Attribute-style properties and pytest hooks
+need exempting, so it wants a small allowlist rather than a blanket rule.
+Pair it with the `test_pipeline_wiring.py` approach: assert against
+`Pipeline.run` with fake collaborators, not against helpers in isolation.

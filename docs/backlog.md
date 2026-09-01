@@ -478,3 +478,62 @@ and the first number attached to it.
    aborting — a stalled test still gets random examples, at a fraction of the
    cost per example. This changes what a plain `backend="crosshair"` run does
    and should be opt-in rather than default-on.
+
+---
+
+## B17. Corpus sweep: the stall is specific, not general
+
+**Area:** corpus / `tools/discovery` · **Kind:** measurement, plus two harness gaps
+
+Seven projects, 213 Hypothesis tests measured under `backend="crosshair"` at
+`max_examples=20`, capped at 40 tests per suite, scored by the B16 path-search
+counters.
+
+| suite | n | ended early | stalled | progressing | median locs |
+| --- | --- | --- | --- | --- | --- |
+| packaging/version | 40 | 0% | **50%** | 50% | 25 |
+| packaging/ranges | 40 | 0% | **38%** | 62% | 75 |
+| packaging/specifier | 40 | 8% | **58%** | 35% | 32 |
+| attrs | 40 | 70% | 0% | 30% | 3 |
+| bidict | 7 | 100% | 0% | 0% | 1 |
+| cattrs | 40 | 30% | 0% | 70% | 43 |
+| dateutil | 4 | 50% | 0% | 50% | 26 |
+| pyrsistent | 2 | 0% | 0% | 100% | 48 |
+| **total** | **213** | **24%** | **27%** | **48%** | |
+
+"Ended early" is fewer than 10 solver iterations, "stalled" is more than 10
+iterations with more than 10 since the last new code location.
+
+**Every one of the 58 stalled tests is in `packaging`.** The other five
+projects stall on nothing. So the reachability problem behind B11 is specific
+to version-string parsing, not a general property of third-party Hypothesis
+suites, and Goal 1 is not blocked corpus-wide.
+
+**A correction to how B11 was generalized.** The "9 code locations, stalls at
+the doorway" figure came from a synthetic test written here -- `st.text()` fed
+to `Version(s)` -- not from `packaging`'s own tests. Its property suite uses
+structured strategies and reaches a median of 25 and a maximum of 147 code
+locations, with half its tests progressing. The relib gaps are real and they
+bite, but they do not flatten the suite that exercises them.
+
+**Reading the counter needs both dimensions.** `attrs` and `bidict` have the
+lowest medians in the corpus (3 and 1) and are the healthiest results in it:
+70% and 100% of their tests end early reporting `exhausted all paths -
+nothing to do`, which is CrossHair proving the property over a small domain.
+Read on `code_locations` alone they would look like the worst suites here.
+Low reach plus few iterations is a proof; low reach plus many iterations is a
+stall.
+
+**Two harness gaps the sweep exposed:**
+
+1. Stateful tests were never forced onto the backend -- fixed. All three in
+   the corpus (two in `pyrsistent`, one in `bidict`) were listed in
+   `forced_nodeids` while recording no solver iterations, so they would have
+   been reported as CrossHair results without ever running under CrossHair.
+2. Collection misses tests that a project's own config excludes. `dateutil`
+   keeps its Hypothesis tests under `tests/property/` and sets `python_files`,
+   so a bare run collects none of them; they appear only when the directory is
+   named explicitly. `jsonschema`'s single Hypothesis file is an OSS-Fuzz
+   harness with no pytest tests, which is a true negative. Candidate discovery
+   should look for Hypothesis usage in files pytest would not collect by
+   default and widen the invocation, or the corpus will silently under-report.

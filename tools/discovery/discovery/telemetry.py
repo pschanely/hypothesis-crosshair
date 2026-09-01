@@ -11,6 +11,13 @@ from typing import Dict, Iterable, Iterator, List, Optional
 
 from .model import CompletionStats
 
+#: Substring the provider logs when a symbolic value is made concrete.
+REALIZE_MARKER = "SMT realized symbolic"
+
+#: Above this share of realizing iterations, a "no failure found" result is not
+#: evidence that the solver explored the test.
+REALIZATION_UNRELIABLE_RATE = 0.5
+
 #: Marker Hypothesis writes into ``how_generated`` for solver-produced cases.
 CROSSHAIR_PHASE_MARKER = "backend='crosshair'"
 
@@ -62,6 +69,12 @@ def aggregate(rows: Iterable[dict]) -> Dict[str, CompletionStats]:
         completion = backend.get("completion")
         if completion:
             entry.counts[completion] = entry.counts.get(completion, 0) + 1
+        realized = sum(
+            1 for message in backend.get("messages", []) if REALIZE_MARKER in message
+        )
+        if realized:
+            entry.realizing_cases += 1
+            entry.realizations += realized
     return stats
 
 
@@ -116,6 +129,15 @@ def is_benign(completion: str) -> bool:
         name = completion[len(_FORWARDED_PREFIX) :].split(" ")[0]
         return name in BENIGN_FORWARDED_EXCEPTIONS
     return False
+
+
+def search_is_degraded(stats: CompletionStats) -> bool:
+    """Whether realization has undercut the solver enough to distrust a pass.
+
+    Realization is invisible in the completion histogram: an iteration whose
+    values were all made concrete still reports ``completed normally``.
+    """
+    return stats.realization_rate >= REALIZATION_UNRELIABLE_RATE
 
 
 def nondeterminism_rate(stats: CompletionStats) -> float:

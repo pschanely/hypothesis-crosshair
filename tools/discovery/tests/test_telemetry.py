@@ -125,3 +125,44 @@ def test_other_forwarded_hypothesis_exceptions_are_reported_as_drift():
 def test_ignored_iterations_are_not_benign():
     assert not telemetry.is_benign("ignored due to proxy intolerance")
     assert telemetry.is_benign("raised AssertionError exception")
+
+
+def realizing_row(name, n=1):
+    entry = row(name, CH, "completed normally")
+    entry["metadata"]["backend"]["messages"] = [
+        f"SMT realized symbolic str_{i:02d} to 'x'" for i in range(n)
+    ]
+    return entry
+
+
+def test_realization_is_counted_even_when_iterations_complete_normally():
+    """Realization is invisible in the completion histogram.
+
+    An iteration whose values were all made concrete still reports
+    'completed normally', so productivity alone cannot show that the solver
+    actually steered the search.
+    """
+    stats = telemetry.aggregate(
+        [realizing_row("t", 3)] * 9 + [row("t", CH, "completed normally")]
+    )["t"]
+    assert stats.counts == {"completed normally": 10}
+    assert stats.productivity == 1.0
+    assert stats.realizing_cases == 9
+    assert stats.realizations == 27
+    assert stats.realization_rate == 0.9
+    assert stats.searched_symbolically == 1
+
+
+def test_a_mostly_realized_run_is_flagged_as_degraded():
+    degraded = telemetry.aggregate(
+        [realizing_row("t")] * 6 + [row("t", CH, "completed normally")] * 4
+    )["t"]
+    healthy = telemetry.aggregate(
+        [realizing_row("t")] * 2 + [row("t", CH, "completed normally")] * 8
+    )["t"]
+    assert telemetry.search_is_degraded(degraded)
+    assert not telemetry.search_is_degraded(healthy)
+
+
+def test_a_run_with_no_solver_cases_is_not_reported_as_degraded():
+    assert not telemetry.search_is_degraded(CompletionStats())

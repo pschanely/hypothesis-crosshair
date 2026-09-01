@@ -86,6 +86,8 @@ class CompletionStats:
     counts: Dict[str, int] = field(default_factory=dict)
     crosshair_cases: int = 0
     covered_lines: Dict[str, List[int]] = field(default_factory=dict)
+    realizing_cases: int = 0
+    realizations: int = 0
 
     @property
     def productive(self) -> int:
@@ -101,6 +103,22 @@ class CompletionStats:
         if not self.crosshair_cases:
             return 0.0
         return self.productive / self.crosshair_cases
+
+    @property
+    def realization_rate(self) -> float:
+        """Share of solver iterations in which a symbolic value was realized.
+
+        A realized value is concrete for the rest of the iteration, so the
+        solver has stopped steering it. A high rate means the run degenerated
+        towards random search regardless of how the iterations completed.
+        """
+        if not self.crosshair_cases:
+            return 0.0
+        return self.realizing_cases / self.crosshair_cases
+
+    @property
+    def searched_symbolically(self) -> int:
+        return self.crosshair_cases - self.realizing_cases
 
     def dominant_ignore_reason(self) -> Optional[str]:
         ignored = {

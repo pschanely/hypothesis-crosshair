@@ -209,3 +209,59 @@ found B8 and B9, made permanent. Attribute-style properties and pytest hooks
 need exempting, so it wants a small allowlist rather than a blanket rule.
 Pair it with the `test_pipeline_wiring.py` approach: assert against
 `Pipeline.run` with fake collaborators, not against helpers in isolation.
+
+---
+
+## B11. Symbolic reasoning does not survive a regex-based parser
+
+**Area:** CrossHair · **Kind:** reachability limit, found by fault injection
+
+A fault was injected into `packaging.version._cmpkey` that skips trailing-zero
+stripping when the release begins `(17, 3, 11)` — inside the tests' strategy
+domain (`st.integers(0, 20)`), but roughly a 1-in-28,000 draw. CrossHair ran 49
+solver iterations against the test that covers it and did not find it.
+
+Bisecting the test's shape isolates where the constraint is lost:
+
+| Test shape | Fault found |
+| --- | --- |
+| Three plain `st.integers(0, 20)` compared for equality | yes, 2.2s |
+| A fixed-length list of the same | yes, 0.9s |
+| A variable-length list | yes, 0.9s |
+| The list joined into `"17.3.11"` and string-compared | yes, 2.3s |
+| The same string passed through `Version()` and compared | **no** |
+
+So symbolic reasoning survives list construction, `str()`, and `join` — and is
+lost inside `Version()`, whose parse is a regex match with named groups. Every
+one of the 49 iterations logged a realization.
+
+This is the mechanism behind B12 and it bounds where the loop can find
+anything: a project whose properties parse strings before asserting on them is
+effectively out of reach, which is a large fraction of exactly the
+parser-and-serializer domain the corpus targets as a best fit.
+
+**Proposed change:** none here — this is a CrossHair capability question, not a
+harness one. Worth confirming whether `re` support is expected to hold under
+these conditions, since the fitness scoring in the design assumes parsers are
+prime targets.
+
+---
+
+## B12. Realization is invisible in the completion histogram
+
+**Area:** provider / `tools/discovery` · **Kind:** missing signal
+
+An iteration whose symbolic values were realized still completes and still
+reports `completed normally`, so the productivity metric cannot distinguish a
+solver-driven search from random testing. Both `packaging` sweeps reported 100%
+productivity at 91% and 99% realization rates.
+
+`tools/discovery` now derives a realization rate from the `SMT realized
+symbolic` entries the provider already emits in `metadata.backend.messages`,
+and warns when a test searched mostly concretely.
+
+Deriving it from a free-text debug log is fragile — it depends on a log
+string's wording, and `_IMPORTANT_LOG_RE` decides what reaches the JSONL at
+all. **Proposed change (provider):** report realization as a structured count
+in `observe_test_case`'s return value, next to `completion`, so consumers do
+not have to parse messages to learn whether the search was symbolic.

@@ -97,8 +97,19 @@ def _telemetry_section(report: PipelineReport) -> List[str]:
             totals[text] = totals.get(text, 0) + count
     if not cases:
         return []
+    realizing = sum(e.realizing_cases for e in stats.values())
+    degraded = [n for n, e in stats.items() if telemetry.search_is_degraded(e)]
     lines = ["solver health (tier B telemetry)"]
     lines.append(f"    {cases} solver iterations, {productive / cases:.0%} productive")
+    lines.append(
+        f"    {realizing} ({realizing / cases:.0%}) realized a symbolic value; "
+        f"{len(degraded)} of {len(stats)} tests searched mostly concretely"
+    )
+    if degraded:
+        lines.append(
+            "    WARNING: where search is degraded, 'no failure found' is not "
+            "evidence the solver explored the test."
+        )
     for text, count in sorted(totals.items(), key=lambda kv: -kv[1]):
         lines.append(f"    {count:6d}  {count / cases:5.1%}  {text}")
     drift: Dict[str, int] = {}

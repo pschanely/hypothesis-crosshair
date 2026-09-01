@@ -308,6 +308,26 @@ it: demote the test for Goal 1, and record the dominant ignore-reason as a
 ranked Goal-2 finding. The ignore-reason histogram, aggregated across the whole
 corpus, is effectively a prioritized CrossHair roadmap derived from real code.
 
+**Productivity is not sufficient, and on its own it misleads.** A realized
+value is concrete for the remainder of the iteration, so the solver has stopped
+steering it — but the iteration still finishes and still reports `completed
+normally`. Search can therefore degenerate into random testing at 100%
+productivity, and the completion histogram will show nothing wrong.
+
+Measured on `pypa/packaging`: the version suite reported 100% productivity
+while **91% of solver iterations contained a realization**, with only 8 of 161
+tests searching symbolically throughout; the ranges suite reported 100%
+productivity at a **99% realization rate**, with 1 of 95 tests clean. Both runs
+found no failures, and on the strength of the productivity number alone that
+was initially read as a meaningful negative result. It was not: those runs were
+mostly random search wearing a solver's coat.
+
+**Therefore: track the realization rate, from the `SMT realized symbolic`
+entries in `metadata.backend.messages`, and treat a passing test above roughly
+50% as carrying no information about whether a bug exists.** A `no_signal`
+verdict is only evidence of absence when the search that produced it stayed
+symbolic.
+
 **Coverage delta.** `coverage` is populated per file as executed line lists.
 Comparing B's union against X's union answers "did the solver reach lines random
 search never did?" That is both the marketing claim for a trophy and a

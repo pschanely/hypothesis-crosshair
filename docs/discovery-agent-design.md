@@ -463,6 +463,7 @@ Deliberately sequenced so the loop is producing Goal-2 value long before it is
 trustworthy enough to talk to strangers.
 
 Stages 1-3 are implemented in [`tools/discovery/`](../tools/discovery/).
+Deferred concerns are tracked in [`backlog.md`](backlog.md).
 
 1. Sandbox + install + collect + baseline gate, on a hand-picked list of ten
    good-fit projects. No agent yet.

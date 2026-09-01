@@ -295,6 +295,27 @@ with no possessive quantifiers at all, and it is blocked too, on the same
 `(?a:` groups. Finding 2 is therefore the one to fix first; fixing 1 alone
 buys nothing.
 
+**What fixing them would buy, measured indirectly.** Stripping both constructs
+from the pattern changes the run's character completely:
+
+| pattern | iters | wall | code locs | sec/iter |
+| --- | --- | --- | --- | --- |
+| as shipped | 149 | 6.5s | 17 | 0.044 |
+| both constructs stripped | 19 | 239.4s | 27 | 12.6 |
+
+A 286x rise in per-iteration cost is the signature of symbolic work actually
+happening, which is the clearest evidence that realization -- not budget -- is
+what makes the shipped pattern cheap and useless. Two caveats keep this from
+being a clean result. The stripped pattern still contains `\+`, so it trips
+finding 3, and the arm is contaminated to an unknown degree. And 17 to 27 code
+locations is a modest gain for 286x the cost.
+
+That suggests fixing these gaps converts "fast and useless" into "slow and
+still limited", at which point this genuinely does become a budget problem --
+the earlier cost framing was describing a second wall, behind the one CrossHair
+actually hits today. Worth re-measuring once findings 1 and 2 are fixed, rather
+than assuming either outcome.
+
 **Proposed change:** report all three upstream to CrossHair. Escaping in
 `unicode_ignorecase_mask` is a small fix. Possessive repeat is `(?>x*)` --
 atomic, no backtracking -- and is arguably easier to encode symbolically than

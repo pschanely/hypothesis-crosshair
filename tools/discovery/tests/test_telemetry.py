@@ -166,3 +166,17 @@ def test_a_mostly_realized_run_is_flagged_as_degraded():
 
 def test_a_run_with_no_solver_cases_is_not_reported_as_degraded():
     assert not telemetry.search_is_degraded(CompletionStats())
+
+
+def test_solver_cases_contribute_no_coverage():
+    """Hypothesis records coverage: null under the CrossHair backend.
+
+    Its line tracer cannot run alongside CrossHair's, so coverage from a solver
+    run describes the concrete phases only and must not be read as solver reach.
+    """
+    solver = row("t", CH, "completed normally")
+    solver["coverage"] = None
+    concrete = row("t", "during shrink phase", None, {"a.py": [1, 2]})
+    stats = telemetry.aggregate([solver, concrete])["t"]
+    assert stats.crosshair_cases == 1
+    assert stats.covered_lines == {"a.py": [1, 2]}

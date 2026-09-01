@@ -124,7 +124,10 @@ def _telemetry_section(report: PipelineReport) -> List[str]:
         len(v) for entry in stats.values() for v in entry.covered_lines.values()
     )
     if covered:
-        lines.append(f"    {covered} distinct lines covered across the run")
+        lines.append(
+            f"    {covered} lines covered in concrete phases only "
+            "(no coverage is recorded under the crosshair backend)"
+        )
     lines.append("")
     return lines
 

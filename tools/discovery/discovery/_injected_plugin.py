@@ -50,6 +50,26 @@ def _unwrap(item: Any) -> Optional[Any]:
     return getattr(func, "__func__", func)
 
 
+def _settings_carrier(item: Any, func: Any, hyp_settings: Any):
+    """Where a test's settings live, and what they currently are.
+
+    A stateful test is collected as ``Machine.TestCase::runTest``, and
+    Hypothesis reads its settings from the ``settings`` attribute of that
+    ``TestCase`` class. Assigning to the ``runTest`` function instead is
+    accepted silently and has no effect, which would leave the test running on
+    the default backend while being reported as a CrossHair result.
+    """
+    owner = getattr(item, "cls", None)
+    existing = getattr(owner, "settings", None)
+    if owner is not None and isinstance(existing, hyp_settings):
+        return owner, "settings", existing
+    return (
+        func,
+        "_hypothesis_internal_use_settings",
+        getattr(func, "_hypothesis_internal_use_settings", None),
+    )
+
+
 def pytest_collection_modifyitems(session, config, items):
     """Force our settings onto Hypothesis tests, overriding explicit ``@settings``.
 
@@ -83,14 +103,14 @@ def pytest_collection_modifyitems(session, config, items):
                 keep.append(item)
             continue
         _hypothesis_nodeids.append(item.nodeid)
-        parent = getattr(func, "_hypothesis_internal_use_settings", None)
+        carrier, attr, parent = _settings_carrier(item, func, hyp_settings)
         try:
             merged = (
                 hyp_settings(parent, **overrides)
                 if parent is not None
                 else hyp_settings(**overrides)
             )
-            func._hypothesis_internal_use_settings = merged
+            setattr(carrier, attr, merged)
             _forced_nodeids.append(item.nodeid)
         except Exception as exc:  # a strategy-level settings conflict, not our bug
             _results[item.nodeid] = {

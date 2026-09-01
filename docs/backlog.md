@@ -235,15 +235,23 @@ So symbolic reasoning survives list construction, `str()`, and `join` — and is
 lost inside `Version()`, whose parse is a regex match with named groups. Every
 one of the 49 iterations logged a realization.
 
-This is the mechanism behind B12 and it bounds where the loop can find
-anything: a project whose properties parse strings before asserting on them is
-effectively out of reach, which is a large fraction of exactly the
-parser-and-serializer domain the corpus targets as a best fit.
+**This is a cost problem, not a capability limit.** CrossHair can crack
+regexes; this one is expensive. `packaging`'s pattern carries about ten
+optional groups (`?+`), and each one forks the path space at least once, so
+the fork count multiplies before any single path gets hard. The realizations
+land on character arithmetic — `48 + int_01%10 == 48`, ASCII `'0'` plus a
+digit — so digits are being made concrete during matching rather than carried
+symbolically across that many branches.
 
-**Proposed change:** none here — this is a CrossHair capability question, not a
-harness one. Worth confirming whether `re` support is expected to hold under
-these conditions, since the fitness scoring in the design assumes parsers are
-prime targets.
+Raising the per-path solver budget does not help, which is the useful part.
+Deadlines of none, 5s and 20s (2.5s/10s/40s per path) all failed to solve
+through the parse, and all finished in ~8-10s without consuming the extra
+budget. The binding constraint is the *number* of paths, not time per path, so
+`max_examples` is the lever rather than `deadline`.
+
+**Proposed change:** none to CrossHair. For the harness, treat "asserts on
+values parsed out of a generated string" as a cost signal during fitness
+scoring, and prefer properties that assert on structured values directly.
 
 ---
 
@@ -265,3 +273,23 @@ string's wording, and `_IMPORTANT_LOG_RE` decides what reaches the JSONL at
 all. **Proposed change (provider):** report realization as a structured count
 in `observe_test_case`'s return value, next to `completion`, so consumers do
 not have to parse messages to learn whether the search was symbolic.
+
+---
+
+## B13. Feed findings into `pschanely/crosshair-benchmark`
+
+**Area:** outputs · **Kind:** additional consumer
+
+Cases the loop turns up are candidate benchmark entries, and the corpus is a
+natural source of realistic ones: the `packaging` regex parse is already a
+concrete example of something measurable and currently out of budget.
+
+One caveat to carry over: a native CrossHair example often has an advantage
+over the equivalent Hypothesis example, so a case lifted from a Hypothesis test
+is not directly comparable to a hand-written native one. Any entries this
+produces should be marked with their provenance, and comparisons kept within
+the same category.
+
+**Proposed change:** decide what shape a benchmark entry takes (property, seed,
+budget, expected outcome), then emit them as a by-product of classification
+rather than as a separate pass.

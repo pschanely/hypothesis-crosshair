@@ -457,11 +457,20 @@ pattern, by contrast, sustains 43 locations at ~1s per iteration of real
 solver work. This is a sharper statement of B11 than the earlier bisection,
 and the first number attached to it.
 
-**Proposed change, two parts, deliberately separate:**
+**Two parts, deliberately separate:**
 
-1. Record `len(visits)` and `iters_since_discovery` per test as discovery-tool
-   telemetry. Contained to the agent; no provider behavior changes.
-2. Optionally let the provider stop a stalled search: when
+1. **Built.** The injected pytest plugin wraps
+   `per_test_case_context_manager` and reads `len(visits)`,
+   `iters_since_discovery` and an iteration count per test, reported as
+   `search` and carried through to each `Classification`. The wrapper is
+   installed only when the run's backend is `crosshair`, so the baseline arm
+   is untouched, and every read is guarded: instrumentation must never be able
+   to fail a target project's run. Because it needs no observability and no
+   tracer, it is collected in the verdict tier as well, which also makes a
+   tier-A/tier-B gap in `code_locations` an independent observer-effect
+   signal. `STALL_THRESHOLD` is 10, per the measurements above.
+2. **Proposal only, not built.** Optionally let the provider stop a stalled
+   search: when
    `iters_since_discovery` exceeds a threshold, `set_completion(...)` and
    raise `BackendCannotProceed("exhausted")`. Hypothesis's engine handles that
    scope by setting `_switch_to_hypothesis_provider` (`engine.py:541`), so the

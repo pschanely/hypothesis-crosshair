@@ -10,7 +10,7 @@ import uuid
 from typing import Dict, List, Optional
 
 from . import telemetry
-from .model import Verdict
+from .model import SearchProgress, Verdict
 from .pipeline import Pipeline, PipelineConfig, PipelineReport
 from .runner import EnvSpec, Runner
 from .sandbox import DockerSandbox, Limits, LocalSandbox, Sandbox, docker_available
@@ -67,6 +67,8 @@ def _format(report: PipelineReport) -> str:
                 lines.append(f"        example: {first[:110]}")
         lines.append("")
     lines.extend(_telemetry_section(report))
+    if report.crosshair_run is not None:
+        lines.extend(_search_section(report.crosshair_run.search))
     if any(c.verdict is Verdict.PENDING_VALIDATION for c in report.classifications):
         lines.append(
             "NOTE: pending_validation means the clean-room replay was inconclusive, "
@@ -127,6 +129,37 @@ def _telemetry_section(report: PipelineReport) -> List[str]:
         lines.append(
             f"    {covered} lines covered in concrete phases only "
             "(no coverage is recorded under the crosshair backend)"
+        )
+    lines.append("")
+    return lines
+
+
+def _search_section(progress: Dict[str, SearchProgress]) -> List[str]:
+    """Report CrossHair's own path-search reach, which needs no observability."""
+    if not progress:
+        return []
+    ran = {k: v for k, v in progress.items() if v.solver_iterations}
+    if not ran:
+        return []
+    total_locs = sum(v.code_locations for v in ran.values())
+    stalled = telemetry.stalled_searches(ran)
+    lines = ["  solver path search (from CrossHair's pathing oracle):"]
+    lines.append(
+        f"    {total_locs} code locations forked across {len(ran)} tests; "
+        f"{len(stalled)} stalled "
+        f"(no new location in {telemetry.STALL_THRESHOLD}+ iterations)"
+    )
+    worst = sorted(ran.items(), key=lambda kv: kv[1].code_locations)[:5]
+    for nodeid, entry in worst:
+        mark = "STALLED" if nodeid in stalled else "       "
+        lines.append(
+            f"    {mark} {entry.code_locations:5d} locs "
+            f"{entry.solver_iterations:5d} iters  {nodeid}"
+        )
+    if stalled:
+        lines.append(
+            "    a stalled search is spending budget without extending reach; "
+            "reach is not discrimination, so this is a budget signal only."
         )
     lines.append("")
     return lines

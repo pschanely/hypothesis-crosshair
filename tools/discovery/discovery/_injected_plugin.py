@@ -11,6 +11,7 @@ command-line surface of the target project is disturbed.
 import json
 import os
 import re
+from contextlib import contextmanager
 from typing import Any, Dict, List, Optional
 
 _REPORT_PATH = os.environ.get("HCD_REPORT")
@@ -29,6 +30,8 @@ _EXC_RE = re.compile(r"^E\s+([A-Za-z_][\w.]*(?:Error|Exception|Warning|Exit))\b"
 _results: Dict[str, Dict[str, Any]] = {}
 _hypothesis_nodeids: List[str] = []
 _forced_nodeids: List[str] = []
+_search: Dict[str, Dict[str, int]] = {}
+_current_nodeid: Optional[str] = None
 
 
 def _is_hypothesis_test(func: Any) -> bool:
@@ -160,6 +163,80 @@ def pytest_runtest_logreport(report):
         _results[report.nodeid] = entry
 
 
+def _sample_search(provider: Any) -> None:
+    """Read CrossHair's own path-search counters for the running test.
+
+    ``CoveragePathingOracle`` tracks the distinct code locations at which the
+    solver has forked (``visits``) and how many iterations have passed since
+    the last new one (``iters_since_discovery``). Reading them costs nothing
+    and needs neither observability nor a tracer, so unlike the completion
+    telemetry this is safe to collect in the verdict tier too.
+    """
+    global _current_nodeid
+    try:
+        nodeid = _current_nodeid
+        if not nodeid:
+            return
+        oracle = getattr(provider, "constrained_oracle", None)
+        inner = getattr(oracle, "inner_oracle", None)
+        visits = getattr(inner, "visits", None)
+        since = getattr(inner, "iters_since_discovery", None)
+        if visits is None or since is None:
+            return
+        entry = _search.setdefault(
+            nodeid,
+            {"code_locations": 0, "iters_since_discovery": 0, "solver_iterations": 0},
+        )
+        entry["code_locations"] = max(entry["code_locations"], len(visits))
+        entry["iters_since_discovery"] = int(since)
+        entry["solver_iterations"] += 1
+    except Exception:
+        # Instrumentation must never be able to fail a target project's run.
+        pass
+
+
+def _install_search_probe() -> None:
+    if _BACKEND != "crosshair":
+        return
+    try:
+        from hypothesis_crosshair_provider import crosshair_provider as provider_mod
+
+        cls = provider_mod.CrossHairPrimitiveProvider
+    except Exception:
+        return
+    if getattr(cls, "_hcd_probed", False):
+        return
+    original = cls.per_test_case_context_manager
+
+    @contextmanager
+    def probed(self):
+        try:
+            with original(self):
+                yield
+        finally:
+            _sample_search(self)
+
+    try:
+        cls.per_test_case_context_manager = probed
+        cls._hcd_probed = True
+    except Exception:
+        pass
+
+
+def pytest_configure(config):
+    _install_search_probe()
+
+
+def pytest_runtest_logstart(nodeid, location):
+    global _current_nodeid
+    _current_nodeid = nodeid
+
+
+def pytest_runtest_logfinish(nodeid, location):
+    global _current_nodeid
+    _current_nodeid = None
+
+
 def pytest_sessionfinish(session, exitstatus):
     if not _REPORT_PATH:
         return
@@ -168,6 +245,7 @@ def pytest_sessionfinish(session, exitstatus):
         "results": list(_results.values()),
         "hypothesis_nodeids": _hypothesis_nodeids,
         "forced_nodeids": _forced_nodeids,
+        "search": _search,
     }
     with open(_REPORT_PATH, "w") as out:
         json.dump(payload, out)

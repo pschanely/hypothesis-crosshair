@@ -9,7 +9,7 @@ import json
 import os
 from typing import Dict, Iterable, Iterator, List, Optional
 
-from .model import CompletionStats
+from .model import CompletionStats, SearchProgress
 
 #: Substring the provider logs when a symbolic value is made concrete.
 REALIZE_MARKER = "SMT realized symbolic"
@@ -17,6 +17,12 @@ REALIZE_MARKER = "SMT realized symbolic"
 #: Above this share of realizing iterations, a "no failure found" result is not
 #: evidence that the solver explored the test.
 REALIZATION_UNRELIABLE_RATE = 0.5
+
+#: Iterations without a new code location before a search counts as stalled.
+#: Measured on packaging's version parse (plateaus at 9) and on a crackable
+#: regex (plateaus at 49, and a threshold of 5 would cut it 8 locations short).
+#: The cost is asymmetric, so this errs generous.
+STALL_THRESHOLD = 10
 
 #: Marker Hypothesis writes into ``how_generated`` for solver-produced cases.
 CROSSHAIR_PHASE_MARKER = "backend='crosshair'"
@@ -145,6 +151,20 @@ def search_is_degraded(stats: CompletionStats) -> bool:
     values were all made concrete still reports ``completed normally``.
     """
     return stats.realization_rate >= REALIZATION_UNRELIABLE_RATE
+
+
+def stalled_searches(
+    progress: Dict[str, "SearchProgress"], threshold: int = STALL_THRESHOLD
+) -> Dict[str, "SearchProgress"]:
+    """Tests whose solver stopped finding new code locations.
+
+    A stalled search is spending budget without extending its reach. It is a
+    weaker claim than "found nothing interesting" -- reach is not the same as
+    discrimination -- so treat it as a budget signal, not as a verdict.
+    """
+    return {
+        nodeid: entry for nodeid, entry in progress.items() if entry.stalled(threshold)
+    }
 
 
 def nondeterminism_rate(stats: CompletionStats) -> float:

@@ -33,9 +33,13 @@ class FakeRunner:
         self.run_specs.append(spec)
         result = RunResult(spec.arm, spec.tier, 0, 0.1)
         for nodeid in spec.nodeids:
-            from discovery.model import CaseOutcome
+            from discovery.model import CaseOutcome, SearchProgress
 
             result.outcomes[nodeid] = CaseOutcome(nodeid, Outcome.PASSED)
+            if spec.arm is Arm.CROSSHAIR:
+                result.search[nodeid] = SearchProgress(
+                    code_locations=7, iters_since_discovery=3, solver_iterations=11
+                )
         return result
 
 
@@ -92,3 +96,13 @@ def test_a_file_selector_is_expanded_against_the_inventory():
 def test_no_selector_runs_the_whole_inventory():
     pipeline, _ = build()
     assert pipeline.run().collected == INVENTORY
+
+
+def test_search_progress_reaches_the_classification():
+    """The oracle counters are useless if nothing carries them to the verdict."""
+    pipeline, _ = build()
+    report = pipeline.run()
+    assert report.classifications
+    for entry in report.classifications:
+        assert entry.search is not None, entry.nodeid
+        assert entry.search.code_locations == 7

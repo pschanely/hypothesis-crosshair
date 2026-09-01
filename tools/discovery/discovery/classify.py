@@ -9,7 +9,15 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence
 
 from . import telemetry
-from .model import Classification, CompletionStats, Outcome, RunResult, Tier, Verdict
+from .model import (
+    Classification,
+    CompletionStats,
+    Outcome,
+    RunResult,
+    SearchProgress,
+    Tier,
+    Verdict,
+)
 
 #: Share of solver iterations lost to nondeterminism before a test is dropped.
 NONDETERMINISM_QUARANTINE_RATE = 0.5
@@ -68,6 +76,7 @@ def classify(
     crosshair_run: RunResult,
     validation: Optional[Outcome] = None,
     stats: Optional[CompletionStats] = None,
+    search: Optional["SearchProgress"] = None,
 ) -> Classification:
     if crosshair_run.tier is not Tier.A_VERDICT:
         raise ValueError("classification requires a tier-A run")
@@ -83,6 +92,7 @@ def classify(
         falsifying_example=detail.falsifying_example if detail else None,
         exception_type=detail.exception_type if detail else None,
         completion=stats,
+        search=search,
     )
 
     if crosshair_run.crashed:

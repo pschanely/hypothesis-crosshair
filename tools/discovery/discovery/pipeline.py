@@ -158,6 +158,7 @@ class Pipeline:
                     crosshair_run=report.crosshair_run,
                     validation=validations.get(nodeid),
                     stats=_stats_for(stats_by_name, nodeid),
+                    search=report.crosshair_run.search.get(nodeid),
                 )
             )
         for nodeid in report.observer_effect:

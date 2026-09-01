@@ -80,6 +80,44 @@ class CaseOutcome:
 
 
 @dataclass
+class SearchProgress:
+    """How far CrossHair's own path search got, per test.
+
+    Read from the provider's ``CoveragePathingOracle``. ``code_locations`` is
+    the number of distinct places the solver forked; ``iters_since_discovery``
+    is how many iterations passed without finding a new one. Unlike the
+    completion counts this needs no observability, so it is available in both
+    tiers, and a large gap between them is itself evidence of an observer
+    effect.
+
+    It measures reach, not discrimination: the same locations are visited
+    whether or not the solver drove an interesting value through them. Use it
+    to spot a stalled search, not to certify a thorough one.
+    """
+
+    code_locations: int = 0
+    iters_since_discovery: int = 0
+    solver_iterations: int = 0
+
+    @property
+    def discovery_rate(self) -> float:
+        if not self.solver_iterations:
+            return 0.0
+        return self.code_locations / self.solver_iterations
+
+    def stalled(self, threshold: int) -> bool:
+        """Whether the search stopped finding new code locations.
+
+        Only meaningful once the search has actually run past the threshold;
+        a short run has not had the chance to stall.
+        """
+        return (
+            self.solver_iterations > threshold
+            and self.iters_since_discovery > threshold
+        )
+
+
+@dataclass
 class CompletionStats:
     """Aggregated ``metadata.backend.completion`` counts from a tier-B run."""
 
@@ -139,6 +177,7 @@ class RunResult:
     duration: float
     outcomes: Dict[str, CaseOutcome] = field(default_factory=dict)
     telemetry: Dict[str, CompletionStats] = field(default_factory=dict)
+    search: Dict[str, SearchProgress] = field(default_factory=dict)
     timed_out: bool = False
     crashed: bool = False
     stderr_tail: str = ""
@@ -163,6 +202,7 @@ class Classification:
     falsifying_example: Optional[str] = None
     exception_type: Optional[str] = None
     completion: Optional[CompletionStats] = None
+    search: Optional[SearchProgress] = None
 
     @property
     def needs_human_review(self) -> bool:

@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence
 
 from . import telemetry
-from .model import Arm, CaseOutcome, Outcome, RunResult, Tier
+from .model import Arm, CaseOutcome, Outcome, RunResult, SearchProgress, Tier
 from .sandbox import Limits, Sandbox
 
 _PLUGIN_SOURCE = os.path.join(
@@ -182,6 +182,7 @@ class Runner:
             or bool(_INTERNAL_ERROR_RE.search(exec_result.stderr))
         )
         result.outcomes = _read_report(paths["report"])
+        result.search = _read_search(paths["report"])
         if spec.tier is Tier.B_TELEMETRY:
             result.telemetry = telemetry.load(paths["storage"])
         return result
@@ -222,6 +223,31 @@ class Runner:
                 f"{result.stderr[-2000:] or result.stdout[-2000:]}"
             )
         return nodeids
+
+
+def _read_search(path: str) -> Dict[str, SearchProgress]:
+    """Per-test path-search counters, if the probe was able to collect them."""
+    payload = _load_report(path)
+    found: Dict[str, SearchProgress] = {}
+    for nodeid, entry in (payload.get("search") or {}).items():
+        if not isinstance(entry, dict):
+            continue
+        found[nodeid] = SearchProgress(
+            code_locations=int(entry.get("code_locations") or 0),
+            iters_since_discovery=int(entry.get("iters_since_discovery") or 0),
+            solver_iterations=int(entry.get("solver_iterations") or 0),
+        )
+    return found
+
+
+def _load_report(path: str) -> dict:
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path) as handle:
+            return json.load(handle)
+    except (json.JSONDecodeError, OSError):
+        return {}
 
 
 def _read_report(path: str) -> Dict[str, CaseOutcome]:

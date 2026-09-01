@@ -216,12 +216,12 @@ Pair it with the `test_pipeline_wiring.py` approach: assert against
 
 ---
 
-## B11. Symbolic reasoning does not survive a regex-based parser
+## B11. Symbolic reasoning stops at three unhandled regex constructs
 
-**Area:** CrossHair · **Kind:** reachability limit, found by fault injection
+**Area:** CrossHair `libimpl/relib.py` · **Kind:** capability gaps + one bug
 
 A fault was injected into `packaging.version._cmpkey` that skips trailing-zero
-stripping when the release begins `(17, 3, 11)` — inside the tests' strategy
+stripping when the release begins `(17, 3, 11)` -- inside the tests' strategy
 domain (`st.integers(0, 20)`), but roughly a 1-in-28,000 draw. CrossHair ran 49
 solver iterations against the test that covers it and did not find it.
 
@@ -235,27 +235,74 @@ Bisecting the test's shape isolates where the constraint is lost:
 | The list joined into `"17.3.11"` and string-compared | yes, 2.3s |
 | The same string passed through `Version()` and compared | **no** |
 
-So symbolic reasoning survives list construction, `str()`, and `join` — and is
-lost inside `Version()`, whose parse is a regex match with named groups. Every
-one of the 49 iterations logged a realization.
+Two earlier readings of this were wrong, and both are corrected here. It is
+not a capability limit on large regexes, and it is not a cost problem either
+("CrossHair can crack regexes; this one is expensive"). CrossHair never starts
+searching: `relib` rejects the pattern outright and falls back to
+`re.Pattern.fullmatch(self, realize(string))` at `relib.py:802`. That is why
+raising the per-path budget changed nothing -- deadlines of none, 5s and 20s
+all finished in ~8-10s without consuming the extra budget. There was no search
+to time out.
 
-**This is a cost problem, not a capability limit.** CrossHair can crack
-regexes; this one is expensive. `packaging`'s pattern carries about ten
-optional groups (`?+`), and each one forks the path space at least once, so
-the fork count multiplies before any single path gets hard. The realizations
-land on character arithmetic — `48 + int_01%10 == 48`, ASCII `'0'` plus a
-digit — so digits are being made concrete during matching rather than carried
-symbolically across that many branches.
+**Where realization actually happens.** `debug("Realized at", ch_stack())`
+gives two independent sites in `Version.__init__`, and the regex is the second
+of them:
 
-Raising the per-path solver budget does not help, which is the useful part.
-Deadlines of none, 5s and 20s (2.5s/10s/40s per path) all failed to solve
-through the parse, and all finished in ~8-10s without consuming the extra
-budget. The binding constraint is the *number* of paths, not time per path, so
-`max_examples` is the lever rather than `deadline`.
+1. `version.py:418`, `_SIMPLE_VERSION_INDICATORS.issuperset(version)`, where
+   the set is `frozenset(".0123456789")`. A `frozenset.issuperset` of a
+   symbolic string iterates and hashes each character, and hashing forces
+   realization. This is a fast-path optimization and it runs on the first
+   statement of `__init__`, before the regex is reached at all.
+2. `version.py:446`, the `fullmatch`, via the `ReUnhandled` fallback below.
 
-**Proposed change:** none to CrossHair. For the harness, treat "asserts on
-values parsed out of a generated string" as a cost signal during fitness
-scoring, and prefer properties that assert on structured values directly.
+**Three distinct findings in `relib`, in the order they are hit:**
+
+| # | Construct | Result | Status |
+| --- | --- | --- | --- |
+| 1 | `POSSESSIVE_REPEAT` (`a*+`, `)?+`) | `ReUnhandled`, realize | gap |
+| 2 | `SUBPATTERN` with inline flags (`(?a:...)`) | `ReUnhandled`, realize | gap |
+| 3 | `unicode_ignorecase_mask` on a metacharacter | `re.error` | **bug** |
+
+Minimal reproductions, greedy vs possessive being one character apart:
+
+```
+greedy      'a*'         OK (symbolic)      possessive  'a*+'        ReUnhandled -> POSSESSIVE_REPEAT
+greedy      '(?:ab)*'    OK (symbolic)      possessive  '(?:ab)*+'   ReUnhandled -> POSSESSIVE_REPEAT
+greedy      '[a-z0-9]+'  OK (symbolic)      possessive  '[a-z0-9]++' ReUnhandled -> POSSESSIVE_REPEAT
+'(?:[0-9]+)'  OK (symbolic)                 '(?a:[0-9]+)' ReUnhandled -> unsupported subpattern args
+```
+
+Finding 3 is a plain defect. `relib.py:127` builds a pattern by interpolating
+a raw character:
+
+```python
+matches = re.compile(chr(cp), re.IGNORECASE).findall(chars)
+```
+
+`chr(cp)` is not escaped, so a metacharacter codepoint raises:
+`'+'`, `'*'`, `'?'` give `nothing to repeat at position 0`; `'('` gives
+`missing ), unterminated subpattern`; `'a'` is fine. `re.escape` is the fix.
+It is currently masked -- findings 1 and 2 bail out before it is reached.
+Reproduced at the `_match_pattern` level; **not** yet reproduced through the
+Hypothesis path, where the string tends to realize before matching gets there,
+so its user-facing impact is unproven.
+
+**Which gap binds.** Not the one tried first. Removing all 12 possessive
+quantifiers from `VERSION_PATTERN` barely moved the needle -- 17 to 20 code
+locations, 5.2s to 5.6s over 149 iterations -- because finding 2 waits behind
+it. `packaging` keeps a `_VERSION_PATTERN_OLD` for pre-3.11.5 interpreters
+with no possessive quantifiers at all, and it is blocked too, on the same
+`(?a:` groups. Finding 2 is therefore the one to fix first; fixing 1 alone
+buys nothing.
+
+**Proposed change:** report all three upstream to CrossHair. Escaping in
+`unicode_ignorecase_mask` is a small fix. Possessive repeat is `(?>x*)` --
+atomic, no backtracking -- and is arguably easier to encode symbolically than
+the greedy form already supported. Inline-flag subpatterns need the flags
+threaded through `_internal_match_patterns` rather than asserted to be zero.
+Separately, `frozenset.issuperset` of a symbolic string is worth supporting as
+a conjunction of character-membership constraints; for a charset as small as
+`".0123456789"` that is well within reach, and it would unblock site 1.
 
 ---
 

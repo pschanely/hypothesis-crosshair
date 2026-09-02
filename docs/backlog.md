@@ -827,3 +827,38 @@ measure of whether the solver reaches something, so a corpus run has to choose
 between breadth and repeats rather than assuming one pass settles a test. The
 deep corpus run's 20 `no_signal` verdicts were single attempts and should be
 read as unmeasured rather than as negative results.
+
+
+---
+
+## B24. Canary baselines at three attempts
+
+Four faults, three attempts each, same budgets as the single-attempt run.
+
+| fault | expected | rate | verdict |
+| --- | --- | --- | --- |
+| `packaging/release-negated` | detected | **2/3** | `trophy_candidate` |
+| `packaging/parsed-pre-shifted` | not detected | 0/3 | `no_signal` |
+| `cattrs/structure-int-shifted` | `trophy_candidate` | 3/3 | `trophy_candidate` |
+| `bidict/write-skips-inverse` | `shared_find` | 3/3 | `shared_find` |
+
+All four behave as expected, and the rates say more than the pass marks.
+
+**2/3 measures B23 directly.** The fault that flipped between runs flips
+within a single canary invocation: attempts one and three find it, attempt two
+does not. That is the non-determinism, observed rather than inferred, and it
+sets a floor on how much a single attempt can be trusted -- roughly a third of
+single-attempt `no_signal` verdicts on a reachable fault would be wrong.
+
+**The negative control is 0/3, and that asymmetry is informative.** B11's relib
+blockage is a capability gap rather than a search outcome, so it does not vary:
+the pattern is rejected identically every time. A fault the solver *cannot*
+reach is stable; a fault it *can* reach is flaky. So a repeated `no_signal` is
+weak evidence of unreachability, while a repeated detection is strong evidence
+of reachability -- the confidence is asymmetric, and only the second direction
+firms up with repetition.
+
+**The cattrs fix is confirmed.** Re-keyed from a literal to a relation, it
+moves from `shared_find` at one attempt to `trophy_candidate` at 3/3, which is
+what B22 predicted: the baseline was reading the trigger out of the patched
+source, not searching for it.

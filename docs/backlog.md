@@ -868,14 +868,18 @@ source, not searching for it.
 
 ## B25. The corpus re-run with retries, and a bug in the retry itself
 
-`--per-test --retry-no-signal 2` over the deep manifest. The container
-restarted partway, so `packaging` (15) and `attrs` (12) completed and `cattrs`,
-`dateutil`, `pyrsistent` and `bidict` did not.
+`--per-test --retry-no-signal 2` over the deep manifest, 47 tests. The
+container restarted twice mid-run, so this was assembled from three launches;
+`cattrs` completed its first pass but was killed during retries.
 
 | project | verdicts | retries that changed one |
 | --- | --- | --- |
 | packaging (15) | 9 `crosshair_timeout`, 6 `no_signal` | 3 |
 | attrs (12) | 7 `crosshair_crash`, 5 `no_signal` | 0 |
+| cattrs (15) | 15 `no_signal` (first pass only) | not reached |
+| dateutil (2) | 2 `no_signal` | 0 |
+| pyrsistent (2) | 2 `no_signal` | 0 |
+| bidict (1) | 1 `no_signal` | 0 |
 
 **The retry had a bug, and its own output showed it.** All three changed
 verdicts went `no_signal` to `crosshair_timeout`. A `no_signal` means the
@@ -883,20 +887,23 @@ solver ran and reported nothing; a timeout means it never finished. Accepting
 one as the outcome of a retry trades an answer for a non-answer, and makes the
 corpus look worse than it is. Fixed: a retry now only replaces a `no_signal`
 with a verdict that says *more*, so timeouts, missing baselines and quarantines
-no longer overwrite it.
+no longer overwrite it. The three timeouts are mostly a budget choice -- 240s
+per test here against 420s in the earlier per-test run -- not a new finding.
 
-The three timeouts are mostly my budget choice -- 240s per test here against
-420s in the earlier per-test run -- rather than a new finding.
-
-**No retry turned a `no_signal` into a finding**, across 11 tests that got
-three attempts each. That does not undo B23's reasoning: the canary measured a
-reachable fault being missed one time in three, so retries demonstrably matter
-where something is there to find. It does say that on this corpus there was
-nothing being missed, which is consistent with every other result: these are
+**No retry anywhere turned a `no_signal` into a finding**, across 16 tests that
+got three attempts each. That does not undo B23: the canary measured a
+*reachable* fault being missed one time in three, so retries demonstrably
+matter where something is there to find. It says that on this corpus there was
+nothing being missed, which is consistent with every other result -- these are
 mature libraries whose suites pass.
 
 **`attrs` confirms B19's classifier fix on real data.** The same seven tests
-that the first deep run filed as `pending_validation` -- on the trophy track,
+the first deep run filed as `pending_validation` -- on the trophy track,
 awaiting a clean-room replay -- now come back as `crosshair_crash` with
 `CrossHair raised crosshair.util.CrossHairInternal inside the test`. That is
 the fix working end to end, on the run that first produced the confusion.
+
+**Practical note for future runs.** Two container restarts killed multi-hour
+runs at roughly the same point. A corpus pass should be driven per project with
+results written as it goes, so a restart costs one project rather than the run;
+the per-project output files are what made this table recoverable at all.

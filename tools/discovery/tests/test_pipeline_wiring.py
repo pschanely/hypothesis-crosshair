@@ -143,3 +143,71 @@ def test_per_test_mode_gives_each_test_its_own_invocation():
     assert [c.nodeid for c in merged.classifications] == ["a::t1", "b::t2", "c::t3"]
     assert merged.duration == 3.0
     assert merged.project_dir == "/proj"
+
+
+def test_per_test_mode_keeps_telemetry_and_search():
+    """Merging must carry both arms, or every telemetry section reports nothing."""
+    from discovery.cli import _run_per_test
+    from discovery.model import (
+        Arm,
+        CaseOutcome,
+        Classification,
+        CompletionStats,
+        Outcome,
+        RunResult,
+        SearchProgress,
+        Tier,
+        Verdict,
+    )
+    from discovery.pipeline import PipelineReport
+
+    class OnePipeline:
+        def __init__(self, root):
+            self.root = root
+
+        def run(self, nodeids):
+            nodeid = nodeids[0]
+            report = PipelineReport(project_dir="/proj")
+            report.classifications = [
+                Classification(
+                    nodeid=nodeid,
+                    verdict=Verdict.NO_SIGNAL,
+                    baseline=Outcome.PASSED,
+                    crosshair=Outcome.PASSED,
+                )
+            ]
+            crosshair = RunResult(Arm.CROSSHAIR, Tier.A_VERDICT, 0, 1.0)
+            crosshair.outcomes[nodeid] = CaseOutcome(nodeid, Outcome.PASSED)
+            crosshair.search[nodeid] = SearchProgress(5, 1, 12)
+            report.crosshair_run = crosshair
+            telemetry_run = RunResult(Arm.CROSSHAIR, Tier.B_TELEMETRY, 0, 1.0)
+            stats = CompletionStats()
+            stats.crosshair_cases = 3
+            stats.unsupported = {"POSSESSIVE_REPEAT": 3}
+            telemetry_run.telemetry[nodeid] = stats
+            report.telemetry_run = telemetry_run
+            return report
+
+    merged = _run_per_test(OnePipeline, "/runs", ["a::t1", "b::t2"])
+    assert merged.crosshair_run is not None
+    assert set(merged.crosshair_run.search) == {"a::t1", "b::t2"}
+    assert merged.telemetry_run is not None
+    assert set(merged.telemetry_run.telemetry) == {"a::t1", "b::t2"}
+
+
+def test_merging_does_not_mutate_the_first_run():
+    """The first run is reused as the accumulator only if it is copied."""
+    from dataclasses import replace as _replace
+
+    from discovery.cli import _merge_run
+    from discovery.model import Arm, RunResult, SearchProgress, Tier
+
+    first = RunResult(Arm.CROSSHAIR, Tier.A_VERDICT, 0, 1.0)
+    first.search["a::t1"] = SearchProgress(1, 0, 2)
+    second = RunResult(Arm.CROSSHAIR, Tier.A_VERDICT, 0, 1.0)
+    second.search["b::t2"] = SearchProgress(2, 0, 3)
+
+    merged = _merge_run(None, first)
+    merged = _merge_run(merged, second)
+    assert set(merged.search) == {"a::t1", "b::t2"}
+    assert set(first.search) == {"a::t1"}, "the source run must not be mutated"

@@ -7,10 +7,11 @@ import shlex
 import sys
 import time
 import uuid
+from dataclasses import replace
 from typing import Dict, List, Optional
 
 from . import telemetry
-from .model import SearchProgress, Verdict
+from .model import RunResult, SearchProgress, Verdict
 from .pipeline import Pipeline, PipelineConfig, PipelineReport
 from .runner import EnvSpec, Runner
 from .sandbox import DockerSandbox, Limits, LocalSandbox, Sandbox, docker_available
@@ -183,6 +184,33 @@ def _search_section(progress: Dict[str, SearchProgress]) -> List[str]:
     return lines
 
 
+def _merge_run(
+    into: Optional[RunResult], one: Optional[RunResult]
+) -> Optional[RunResult]:
+    """Accumulate one arm's results across per-test invocations.
+
+    Without this the merged report carries no run at all, and every section
+    keyed off one -- the completion histogram, the fallback report, the path
+    search -- silently reports nothing.
+    """
+    if one is None:
+        return into
+    if into is None:
+        return replace(
+            one,
+            outcomes=dict(one.outcomes),
+            telemetry=dict(one.telemetry),
+            search=dict(one.search),
+        )
+    into.outcomes.update(one.outcomes)
+    into.telemetry.update(one.telemetry)
+    into.search.update(one.search)
+    into.duration += one.duration
+    into.timed_out = into.timed_out or one.timed_out
+    into.crashed = into.crashed or one.crashed
+    return into
+
+
 def _run_per_test(build, run_root: str, nodeids: List[str]) -> PipelineReport:
     """Run each test in its own invocation and merge the reports.
 
@@ -204,6 +232,8 @@ def _run_per_test(build, run_root: str, nodeids: List[str]) -> PipelineReport:
         merged.validations.update(one.validations)
         merged.clean_room = one.clean_room or merged.clean_room
         merged.duration += one.duration
+        merged.crosshair_run = _merge_run(merged.crosshair_run, one.crosshair_run)
+        merged.telemetry_run = _merge_run(merged.telemetry_run, one.telemetry_run)
         print(
             f"  [{index + 1}/{len(nodeids)}] {nodeid} -> "
             + ", ".join(sorted({c.verdict.value for c in one.classifications})),

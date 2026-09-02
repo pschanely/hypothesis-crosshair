@@ -85,12 +85,39 @@ class Fault:
     expect_verdicts: Optional[FrozenSet[Verdict]] = None
 
 
+#: Where a pending injection is recorded, so a killed run can be undone.
+#:
+#: ``finally`` does not run when the process is killed, which leaves the target
+#: project patched. The next run then fails to find its anchor, and a checkout
+#: shared with other work silently carries the fault.
+BACKUP_SUFFIX = ".canary-backup"
+
+
+def restore_pending(project_dir: str) -> List[str]:
+    """Undo any injection a previous run was killed before reverting."""
+    restored = []
+    for root, _dirs, files in os.walk(project_dir):
+        for name in files:
+            if not name.endswith(BACKUP_SUFFIX):
+                continue
+            backup = os.path.join(root, name)
+            target = backup[: -len(BACKUP_SUFFIX)]
+            with open(backup) as handle:
+                original = handle.read()
+            with open(target, "w") as handle:
+                handle.write(original)
+            os.remove(backup)
+            restored.append(os.path.relpath(target, project_dir))
+    return restored
+
+
 @contextmanager
 def injected(project_dir: str, fault: Fault) -> Iterator[str]:
     """Apply a fault for the duration of the block, then restore the file."""
     path = os.path.join(project_dir, fault.relative_path)
     if not os.path.exists(path):
         raise FaultNotApplied(f"{fault.name}: {fault.relative_path} does not exist")
+    restore_pending(project_dir)
     with open(path) as handle:
         before = handle.read()
     occurrences = before.count(fault.original)
@@ -102,13 +129,18 @@ def injected(project_dir: str, fault: Fault) -> Iterator[str]:
     patched = before.replace(fault.original, fault.replacement)
     if patched == before:
         raise FaultNotApplied(f"{fault.name}: replacement changed nothing")
+    backup = path + BACKUP_SUFFIX
     try:
+        with open(backup, "w") as handle:
+            handle.write(before)
         with open(path, "w") as handle:
             handle.write(patched)
         yield path
     finally:
         with open(path, "w") as handle:
             handle.write(before)
+        if os.path.exists(backup):
+            os.remove(backup)
         with open(path) as handle:
             if handle.read() != before:
                 raise FaultNotApplied(

@@ -233,3 +233,46 @@ def test_import_check_is_skipped_when_no_module_is_declared():
         expectation=Expectation.DETECTED,
     )
     verify_target_imports(["/nonexistent/python"], "/nowhere", fault)
+
+
+def test_a_killed_run_is_undone_on_the_next_injection(tmp_path):
+    """finally does not run when the process is killed."""
+    from discovery.canary import BACKUP_SUFFIX, Expectation, Fault, injected
+
+    source = tmp_path / "mod.py"
+    source.write_text("VALUE = 1\n")
+    # what a killed run leaves behind: a patched file and its backup
+    source.write_text("VALUE = 2\n")
+    (tmp_path / ("mod.py" + BACKUP_SUFFIX)).write_text("VALUE = 1\n")
+
+    fault = Fault(
+        name="x/y",
+        relative_path="mod.py",
+        original="VALUE = 1",
+        replacement="VALUE = 3",
+        nodeids=["t::a"],
+        expectation=Expectation.DETECTED,
+    )
+    with injected(str(tmp_path), fault):
+        assert source.read_text() == "VALUE = 3\n"
+    assert source.read_text() == "VALUE = 1\n"
+    assert not (tmp_path / ("mod.py" + BACKUP_SUFFIX)).exists()
+
+
+def test_injection_leaves_no_backup_behind(tmp_path):
+    from discovery.canary import BACKUP_SUFFIX, Expectation, Fault, injected
+
+    source = tmp_path / "mod.py"
+    source.write_text("VALUE = 1\n")
+    fault = Fault(
+        name="x/y",
+        relative_path="mod.py",
+        original="VALUE = 1",
+        replacement="VALUE = 2",
+        nodeids=["t::a"],
+        expectation=Expectation.DETECTED,
+    )
+    with injected(str(tmp_path), fault):
+        assert (tmp_path / ("mod.py" + BACKUP_SUFFIX)).exists(), "no undo record"
+    assert not (tmp_path / ("mod.py" + BACKUP_SUFFIX)).exists()
+    assert source.read_text() == "VALUE = 1\n"

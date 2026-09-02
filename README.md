@@ -56,7 +56,10 @@ pytest . --hypothesis-profile=crosshair
 ## Changelog
 
 ### Next Version
-* Nothing yet!
+* Report more of the debug log through observability. `observe_test_case` now
+  also reports the construct behind a fallback to concrete matching, and the
+  code that forced a value to be realized. A fallback was previously invisible:
+  the iteration still completes normally, having matched concretely.
 
 ### 0.0.30
 * Avoid a spurious InvalidArgument error from hypothesis when CrossHair

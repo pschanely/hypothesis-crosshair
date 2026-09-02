@@ -13,7 +13,10 @@ from hypothesis.errors import BackendCannotProceed
 from hypothesis.internal.conjecture.provider_conformance import run_conformance_test
 from hypothesis.internal.intervalsets import IntervalSet
 
-from hypothesis_crosshair_provider.crosshair_provider import CrossHairPrimitiveProvider
+from hypothesis_crosshair_provider.crosshair_provider import (
+    CrossHairPrimitiveProvider,
+    summarize_debug_log,
+)
 
 
 class TargetException(Exception):
@@ -249,3 +252,52 @@ def test_unsat_during_user_exception_realization(solver_is_sat_mock):
             s_int = provider.draw_integer()
             raise TargetException
     assert solver_is_sat_mock.call_count == 1
+
+
+def test_summarize_debug_log_reports_an_unsupported_construct():
+    """The construct is logged after the pattern, not beside the marker."""
+    text = (
+        "1.000|   |_fullmatch() Unsupported symbolic regex \\s*\n"
+        "    (?P<release>[0-9]+)\n"
+        "    (?:[._-][a-z0-9]+)*+\n"
+        "\\s* POSSESSIVE_REPEAT"
+    )
+    assert summarize_debug_log(text) == [
+        "Unsupported symbolic regex: \\s* POSSESSIVE_REPEAT"
+    ]
+
+
+def test_summarize_debug_log_names_the_code_that_forced_realization():
+    text = (
+        "1.000|  |find_model_value() Realized at (t mine.py:9) "
+        "(__init__ version.py:418) (__ch_realize__ builtinslib.py:1472) "
+        "(find_model_value statespace.py:1117)"
+    )
+    assert summarize_debug_log(text) == [
+        "Realized at (t mine.py:9) (__init__ version.py:418)"
+    ]
+
+
+def test_summarize_debug_log_drops_a_stack_of_only_plumbing():
+    text = (
+        "1.000|  |find_model_value() Realized at "
+        "(__ch_realize__ builtinslib.py:1472) (find_model_value statespace.py:1117)"
+    )
+    assert summarize_debug_log(text) == []
+
+
+def test_summarize_debug_log_keeps_solver_messages():
+    text = (
+        "1.000|  |f() SMT realized symbolic: str_01len == 0\n"
+        "2.000|  |g() SMT chose: Not(str_01len > 0) (chance: 0.75)"
+    )
+    assert summarize_debug_log(text) == [
+        "SMT realized symbolic: str_01len == 0",
+        "SMT chose: Not(str_01len > 0) (chance: 0.75)",
+    ]
+
+
+def test_summarize_debug_log_discards_the_bulk_of_the_buffer():
+    """Most of the buffer is constraint dumps; reporting it all is untenable."""
+    noise = "\n".join(f"{i}.000|  |h() Iteration {i}" for i in range(200))
+    assert summarize_debug_log(noise) == []

@@ -122,6 +122,24 @@ def _telemetry_section(report: PipelineReport) -> List[str]:
         lines.append("    possible API drift (excludes assume() filtering):")
         for text, count in sorted(drift.items(), key=lambda kv: -kv[1]):
             lines.append(f"        {count:6d}  {text}")
+    unsupported = telemetry.unsupported_constructs(stats)
+    if unsupported:
+        fallbacks = sum(unsupported.values())
+        lines.append(
+            f"    {fallbacks} iterations fell back to concrete matching on a "
+            "construct CrossHair does not handle:"
+        )
+        for reason, count in sorted(unsupported.items(), key=lambda kv: -kv[1]):
+            lines.append(f"        {count:6d}  {reason[:90]}")
+        lines.append(
+            "    a fallback still reports 'completed normally', so these "
+            "iterations are concrete random search wearing a solver's name."
+        )
+    sites = telemetry.realization_sites(stats)
+    if sites:
+        lines.append("    realization forced at:")
+        for site, count in sorted(sites.items(), key=lambda kv: -kv[1])[:5]:
+            lines.append(f"        {count:6d}  {site[:90]}")
     covered = sum(
         len(v) for entry in stats.values() for v in entry.covered_lines.values()
     )

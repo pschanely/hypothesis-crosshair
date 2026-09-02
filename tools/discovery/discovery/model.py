@@ -126,6 +126,8 @@ class CompletionStats:
     covered_lines: Dict[str, List[int]] = field(default_factory=dict)
     realizing_cases: int = 0
     realizations: int = 0
+    unsupported: Dict[str, int] = field(default_factory=dict)
+    realization_sites: Dict[str, int] = field(default_factory=dict)
 
     @property
     def productive(self) -> int:
@@ -153,6 +155,15 @@ class CompletionStats:
         if not self.crosshair_cases:
             return 0.0
         return self.realizing_cases / self.crosshair_cases
+
+    @property
+    def fell_back_to_concrete(self) -> int:
+        """Iterations where a construct CrossHair cannot handle forced a fallback.
+
+        The fallback is otherwise invisible: the iteration still completes
+        normally, having matched concretely.
+        """
+        return sum(self.unsupported.values())
 
     @property
     def searched_symbolically(self) -> int:

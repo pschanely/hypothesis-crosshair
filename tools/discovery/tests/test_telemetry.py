@@ -180,3 +180,61 @@ def test_solver_cases_contribute_no_coverage():
     stats = telemetry.aggregate([solver, concrete])["t"]
     assert stats.crosshair_cases == 1
     assert stats.covered_lines == {"a.py": [1, 2]}
+
+
+def _crosshair_row(name, messages):
+    return {
+        "property": name,
+        "how_generated": CH,
+        "metadata": {
+            "backend": {"completion": "completed normally", "messages": messages}
+        },
+    }
+
+
+def test_an_unsupported_construct_is_counted_per_reason():
+    stats = telemetry.aggregate(
+        [
+            _crosshair_row(
+                "t1", ["Unsupported symbolic regex: \\s* POSSESSIVE_REPEAT"]
+            ),
+            _crosshair_row(
+                "t1", ["Unsupported symbolic regex: \\s* POSSESSIVE_REPEAT"]
+            ),
+            _crosshair_row(
+                "t2", ["Unsupported symbolic regex: unsupported subpattern args"]
+            ),
+        ]
+    )
+    assert telemetry.unsupported_constructs(stats) == {
+        "\\s* POSSESSIVE_REPEAT": 2,
+        "unsupported subpattern args": 1,
+    }
+
+
+def test_a_fallback_is_invisible_in_the_completion_histogram():
+    """The whole point: these iterations report completing normally."""
+    stats = telemetry.aggregate(
+        [_crosshair_row("t1", ["Unsupported symbolic regex: \\s* POSSESSIVE_REPEAT"])]
+    )
+    entry = stats["t1"]
+    assert entry.counts == {"completed normally": 1}
+    assert entry.fell_back_to_concrete == 1
+
+
+def test_realization_sites_are_aggregated():
+    stats = telemetry.aggregate(
+        [
+            _crosshair_row("t1", ["Realized at (t a.py:9) (__init__ version.py:418)"]),
+            _crosshair_row("t2", ["Realized at (t a.py:9) (__init__ version.py:418)"]),
+        ]
+    )
+    assert telemetry.realization_sites(stats) == {
+        "(t a.py:9) (__init__ version.py:418)": 2
+    }
+
+
+def test_a_run_with_no_fallbacks_reports_none():
+    stats = telemetry.aggregate([_crosshair_row("t1", ["SMT chose: x > 0"])])
+    assert telemetry.unsupported_constructs(stats) == {}
+    assert stats["t1"].fell_back_to_concrete == 0

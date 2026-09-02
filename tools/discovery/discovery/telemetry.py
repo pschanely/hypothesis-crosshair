@@ -14,6 +14,12 @@ from .model import CompletionStats, SearchProgress
 #: Substring the provider logs when a symbolic value is made concrete.
 REALIZE_MARKER = "SMT realized symbolic"
 
+#: CrossHair logs this when it cannot handle a construct and matches concretely.
+UNSUPPORTED_MARKER = "Unsupported symbolic regex"
+
+#: CrossHair logs this with the frames that forced a value to be realized.
+REALIZED_AT_MARKER = "Realized at"
+
 #: Above this share of realizing iterations, a "no failure found" result is not
 #: evidence that the solver explored the test.
 REALIZATION_UNRELIABLE_RATE = 0.5
@@ -81,6 +87,13 @@ def aggregate(rows: Iterable[dict]) -> Dict[str, CompletionStats]:
         if realized:
             entry.realizing_cases += 1
             entry.realizations += realized
+        for message in backend.get("messages", []):
+            if message.startswith(UNSUPPORTED_MARKER):
+                reason = message.split(":", 1)[-1].strip()
+                entry.unsupported[reason] = entry.unsupported.get(reason, 0) + 1
+            elif message.startswith(REALIZED_AT_MARKER):
+                site = message[len(REALIZED_AT_MARKER) :].strip()
+                entry.realization_sites[site] = entry.realization_sites.get(site, 0) + 1
     return stats
 
 
@@ -181,3 +194,26 @@ def nondeterminism_rate(stats: CompletionStats) -> float:
         n for text, n in stats.counts.items() if "non determinism" in text.lower()
     )
     return hits / stats.crosshair_cases
+
+
+def unsupported_constructs(stats: Dict[str, CompletionStats]) -> Dict[str, int]:
+    """Constructs that forced a fallback to concrete matching, across a run.
+
+    A fallback is invisible in every other signal: the iteration reports
+    ``completed normally`` and the search simply stops being symbolic. Finding
+    these by hand meant reading a debug buffer.
+    """
+    totals: Dict[str, int] = {}
+    for entry in stats.values():
+        for reason, count in entry.unsupported.items():
+            totals[reason] = totals.get(reason, 0) + count
+    return totals
+
+
+def realization_sites(stats: Dict[str, CompletionStats]) -> Dict[str, int]:
+    """Where realization was forced, innermost non-plumbing frames first."""
+    totals: Dict[str, int] = {}
+    for entry in stats.values():
+        for site, count in entry.realization_sites.items():
+            totals[site] = totals.get(site, 0) + count
+    return totals

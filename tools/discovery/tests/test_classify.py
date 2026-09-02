@@ -170,3 +170,74 @@ def test_a_test_that_never_ran_is_not_called_unstable():
         crosshair_run=run(Outcome.NOT_RUN),
     )
     assert verdict.verdict is Verdict.NO_BASELINE_RESULT
+
+
+def _run_with(nodeid, outcome, **kw):
+    """A tier-A crosshair run carrying one case outcome."""
+    from discovery.model import Arm, CaseOutcome, RunResult, Tier
+
+    run = RunResult(Arm.CROSSHAIR, Tier.A_VERDICT, kw.pop("returncode", 0), 1.0, **kw)
+    run.outcomes[nodeid] = outcome
+    return run
+
+
+def test_a_timeout_is_not_reported_as_a_crash():
+    """The sandbox SIGKILLs on timeout, so a timeout also looks like a crash."""
+    from discovery.classify import BaselineVerdict, Stability, classify
+    from discovery.model import CaseOutcome, Outcome, Verdict
+
+    nodeid = "t.py::test_slow"
+    run = _run_with(
+        nodeid,
+        CaseOutcome(nodeid, Outcome.NOT_RUN),
+        returncode=-9,
+        timed_out=True,
+        crashed=True,
+    )
+    entry = classify(
+        nodeid,
+        baseline=BaselineVerdict(nodeid, Stability.STABLE_PASS, [Outcome.PASSED]),
+        crosshair_run=run,
+    )
+    assert entry.verdict is Verdict.CROSSHAIR_TIMEOUT
+
+
+def test_a_crosshair_internal_error_is_not_a_trophy_candidate():
+    """CrossHair failing itself must not be routed to the trophy track."""
+    from discovery.classify import BaselineVerdict, Stability, classify
+    from discovery.model import CaseOutcome, Outcome, Verdict
+
+    nodeid = "t.py::test_thing"
+    run = _run_with(
+        nodeid,
+        CaseOutcome(
+            nodeid,
+            Outcome.FAILED,
+            exception_type="crosshair.util.CrossHairInternal",
+            message="Numeric operation on symbolic while not tracing",
+        ),
+    )
+    entry = classify(
+        nodeid,
+        baseline=BaselineVerdict(nodeid, Stability.STABLE_PASS, [Outcome.PASSED]),
+        crosshair_run=run,
+    )
+    assert entry.verdict is Verdict.CROSSHAIR_CRASH
+
+
+def test_an_ordinary_failure_still_needs_validation():
+    """The internal-error check must not swallow real findings."""
+    from discovery.classify import BaselineVerdict, Stability, classify
+    from discovery.model import CaseOutcome, Outcome, Verdict
+
+    nodeid = "t.py::test_real"
+    run = _run_with(
+        nodeid,
+        CaseOutcome(nodeid, Outcome.FAILED, exception_type="AssertionError"),
+    )
+    entry = classify(
+        nodeid,
+        baseline=BaselineVerdict(nodeid, Stability.STABLE_PASS, [Outcome.PASSED]),
+        crosshair_run=run,
+    )
+    assert entry.verdict is Verdict.PENDING_VALIDATION

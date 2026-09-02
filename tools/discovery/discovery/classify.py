@@ -10,6 +10,7 @@ from typing import Dict, List, Optional, Sequence
 
 from . import telemetry
 from .model import (
+    CaseOutcome,
     Classification,
     CompletionStats,
     Outcome,
@@ -69,6 +70,26 @@ def needs_validation(baseline: Outcome, crosshair: Outcome) -> bool:
     return baseline is Outcome.PASSED and crosshair is Outcome.FAILED
 
 
+#: Exception types that mean CrossHair itself failed, not the code under test.
+#:
+#: These surface as ordinary test failures, so without this they are scored as
+#: findings and routed to the trophy track, where a CrossHair defect would be
+#: presented as a candidate third-party bug awaiting validation.
+CROSSHAIR_INTERNAL_EXCEPTIONS = (
+    "CrossHairInternal",
+    "CrosshairInternal",
+    "NotDeterministic",
+    "UnexploredPath",
+    "IgnoreAttempt",
+)
+
+
+def _is_crosshair_internal_error(detail: Optional[CaseOutcome]) -> bool:
+    name = (detail.exception_type or "") if detail is not None else ""
+    tail = name.rsplit(".", 1)[-1]
+    return tail in CROSSHAIR_INTERNAL_EXCEPTIONS
+
+
 def classify(
     nodeid: str,
     *,
@@ -95,10 +116,20 @@ def classify(
         search=search,
     )
 
-    if crosshair_run.crashed:
+    # Checked before the crash arm: the sandbox escalates a timeout straight to
+    # SIGKILL, so an exhausted budget also sets a negative return code and would
+    # otherwise be reported as a CrossHair crash.
+    if crosshair is Outcome.TIMEOUT or crosshair_run.timed_out:
+        result.verdict = Verdict.CROSSHAIR_TIMEOUT
+        result.rationale = "CrossHair arm exceeded its wall-clock budget"
+        return result
+
+    if crosshair_run.crashed or _is_crosshair_internal_error(detail):
         result.verdict = Verdict.CROSSHAIR_CRASH
         result.rationale = (
-            f"CrossHair arm exited abnormally (rc={crosshair_run.returncode})"
+            f"CrossHair raised {detail.exception_type} inside the test"
+            if detail is not None and _is_crosshair_internal_error(detail)
+            else f"CrossHair arm exited abnormally (rc={crosshair_run.returncode})"
         )
         return result
 
@@ -112,11 +143,6 @@ def classify(
         result.rationale = "baseline outcomes differed across seeds: " + ", ".join(
             o.value for o in baseline.outcomes
         )
-        return result
-
-    if crosshair is Outcome.TIMEOUT or crosshair_run.timed_out:
-        result.verdict = Verdict.CROSSHAIR_TIMEOUT
-        result.rationale = "CrossHair arm exceeded its wall-clock budget"
         return result
 
     if baseline.stability is Stability.STABLE_FAIL:

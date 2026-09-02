@@ -578,3 +578,53 @@ detected and nothing detected was what it wanted. A canary that reports green
 when the pipeline produced nothing retires the doubt it exists to hold open.
 Inconclusive verdicts now fail in both directions. The canary's first act was
 to catch a bug in the canary.
+
+
+---
+
+## B19. The deep corpus run found two classifier bugs and a fourth CrossHair defect
+
+**Area:** `tools/discovery/classify.py` · **Kind:** results, and two fixes
+
+47 progressing tests across six projects through the full pipeline at
+`crosshair_max_examples=300` against a 3x400 baseline.
+
+| project | verdicts |
+| --- | --- |
+| packaging (15) | 15 `crosshair_crash` -- misclassified, see below |
+| attrs (12) | 7 `pending_validation` -- misclassified, 5 `no_signal` |
+| cattrs (15) | 15 `no_signal` |
+| dateutil (2) | 2 `no_signal` |
+| pyrsistent (2) | 2 `no_signal` |
+| bidict (1) | 1 `no_signal` |
+
+No trophies. Both non-`no_signal` groups turned out to be defects in the
+classifier rather than findings, which is the answer the canary was built to
+make legible: before it, a run of 47 tests reporting 22 non-trivial verdicts
+would have looked like a productive sweep.
+
+**Bug 1: a timeout was reported as a crash.** All 15 `packaging` tests hit the
+2400s wall budget, and the sandbox escalates a timeout straight to SIGKILL, so
+the run carried both `timed_out` and a negative return code. The crash branch
+was checked first, so `CROSSHAIR_TIMEOUT` was unreachable dead code and every
+budget exhaustion was reported as CrossHair crashing. Fixed by checking the
+timeout first. This is B2 showing its cost: the budget is per invocation, so
+15 tests at 300 examples share one 2400s allowance.
+
+**Bug 2: a CrossHair internal error was routed to the trophy track.** The
+seven `attrs` results were `CrossHairInternal: Numeric operation on symbolic
+while not tracing`, raised inside the test and caught by pytest as an ordinary
+failure. `_INTERNAL_ERROR_RE` only scans stderr, so nothing caught it, and the
+classifier treated it as a finding awaiting validation. A CrossHair defect
+would have been presented as a candidate third-party bug -- the exact
+false-positive path that gates Goal 1. Fixed by classifying a
+crosshair-internal exception type as `crosshair_crash` before the finding
+branch.
+
+**A fourth CrossHair finding, for the report in `crosshair-findings.md`:**
+`CrossHairInternal: Numeric operation on symbolic while not tracing`
+reproduces on seven of `attrs`' `tests/test_funcs.py` tests (`TestAssoc`,
+`TestEvolve`, `TestAsDict::test_asdict_preserve_order`) under
+`backend="crosshair"`. Unlike the three relib findings this one is a genuine
+internal invariant failure on unmodified third-party code, and it needs no
+fault injection to reproduce.

@@ -188,6 +188,8 @@ class CanaryResult:
     missing: List[str] = field(default_factory=list)
     expect_verdicts: Optional[FrozenSet[Verdict]] = None
     error: Optional[str] = None
+    attempts: int = 1
+    detections: int = 0
 
     @property
     def conclusive(self) -> bool:
@@ -204,7 +206,9 @@ class CanaryResult:
         if not self.conclusive:
             return False
         if self.expect_verdicts is not None:
-            return set(self.verdicts.values()) <= set(self.expect_verdicts)
+            return bool(self.verdicts) and set(self.verdicts.values()) <= set(
+                self.expect_verdicts
+            )
         return self.detected == (self.expectation is Expectation.DETECTED)
 
     @property
@@ -263,6 +267,11 @@ def summarise(results: Sequence[CanaryResult]) -> List[str]:
         lines.append(
             f"  {mark}  {entry.fault:34s} expected {_expected_label(entry):22s} "
             f"{entry.detail}"
+            + (
+                f"  [found {entry.detections}/{entry.attempts}]"
+                if entry.attempts > 1
+                else ""
+            )
         )
     failed = [entry for entry in results if not entry.passed]
     lines.append(
@@ -274,3 +283,36 @@ def summarise(results: Sequence[CanaryResult]) -> List[str]:
             "until it is explained."
         )
     return lines
+
+
+def combine(fault: Fault, results: Sequence[CanaryResult]) -> CanaryResult:
+    """Fold repeated attempts at one fault into a single result.
+
+    The solver's per-path deadlines are measured in process time, so a path
+    that finishes on an idle machine is abandoned on a loaded one and the
+    search takes a different route. A seeded run is therefore not reproducible,
+    and a single attempt decides a canary on a coin toss.
+
+    A fault expected to be found passes if any attempt found it: the question
+    is whether the pipeline can reach it at all. A fault expected not to be
+    found must go unfound in every attempt, which is the harder claim and the
+    one worth making strictly.
+    """
+    conclusive = [r for r in results if r.conclusive]
+    merged = CanaryResult(
+        fault=fault.name,
+        expectation=fault.expectation,
+        expect_verdicts=fault.expect_verdicts,
+        attempts=len(results),
+        detections=sum(1 for r in conclusive if r.detected),
+    )
+    if not conclusive:
+        merged.error = next((r.error for r in results if r.error), None)
+        merged.missing = results[0].missing if results else []
+        merged.verdicts = results[0].verdicts if results else {}
+        return merged
+    for entry in conclusive:
+        merged.verdicts.update(entry.verdicts)
+    merged.detected = merged.detections > 0
+    merged.unconfirmed = any(r.unconfirmed for r in conclusive)
+    return merged

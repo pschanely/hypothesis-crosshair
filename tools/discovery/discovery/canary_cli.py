@@ -8,7 +8,7 @@ import uuid
 from typing import List, Optional
 
 from . import faults as fault_defs
-from .canary import CanaryResult, run_fault, summarise
+from .canary import CanaryResult, combine, run_fault, summarise
 from .pipeline import Pipeline, PipelineConfig
 from .runner import EnvSpec, Runner
 from .sandbox import DockerSandbox, Limits, LocalSandbox, Sandbox, docker_available
@@ -53,6 +53,16 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument(
         "--fault", action="append", default=[], help="run only these faults, by name"
     )
+    parser.add_argument(
+        "--repeat",
+        type=int,
+        default=3,
+        help=(
+            "attempts per fault. The solver's per-path deadlines are measured "
+            "in process time, so a seeded run is not reproducible and one "
+            "attempt decides a canary on a coin toss."
+        ),
+    )
     args = parser.parse_args(argv)
 
     project = os.path.abspath(args.project)
@@ -79,23 +89,30 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     results: List[CanaryResult] = []
     for fault in chosen:
-        runner = Runner(
-            _build_sandbox(args),
-            project_dir=project,
-            run_root=os.path.join(run_root, fault.name.replace("/", "_")),
-        )
-        pipeline = Pipeline(
-            runner,
-            crosshair_env=EnvSpec(
-                "crosshair", shlex.split(args.crosshair_python), has_crosshair=True
-            ),
-            validation_env=EnvSpec(
-                "validation", shlex.split(args.validation_python), has_crosshair=False
-            ),
-            config=config,
-        )
-        results.append(run_fault(pipeline, project, fault))
-        print(f"  ran {fault.name}: {results[-1].detail}", flush=True)
+        attempts = []
+        for attempt in range(max(1, args.repeat)):
+            slot = os.path.join(
+                run_root, fault.name.replace("/", "_"), f"attempt{attempt:02d}"
+            )
+            runner = Runner(_build_sandbox(args), project_dir=project, run_root=slot)
+            pipeline = Pipeline(
+                runner,
+                crosshair_env=EnvSpec(
+                    "crosshair", shlex.split(args.crosshair_python), has_crosshair=True
+                ),
+                validation_env=EnvSpec(
+                    "validation",
+                    shlex.split(args.validation_python),
+                    has_crosshair=False,
+                ),
+                config=config,
+            )
+            attempts.append(run_fault(pipeline, project, fault))
+            print(
+                f"  {fault.name} attempt {attempt + 1}: {attempts[-1].detail}",
+                flush=True,
+            )
+        results.append(combine(fault, attempts))
 
     print()
     print("\n".join(summarise(results)))

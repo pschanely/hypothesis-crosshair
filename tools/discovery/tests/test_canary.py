@@ -276,3 +276,66 @@ def test_injection_leaves_no_backup_behind(tmp_path):
         assert (tmp_path / ("mod.py" + BACKUP_SUFFIX)).exists(), "no undo record"
     assert not (tmp_path / ("mod.py" + BACKUP_SUFFIX)).exists()
     assert source.read_text() == "VALUE = 1\n"
+
+
+def _attempt(detected, verdict=None):
+    from discovery.canary import CanaryResult, Expectation
+    from discovery.model import Verdict
+
+    return CanaryResult(
+        fault="f",
+        expectation=Expectation.DETECTED,
+        verdicts={
+            "t::a": verdict
+            or (Verdict.TROPHY_CANDIDATE if detected else Verdict.NO_SIGNAL)
+        },
+        detected=detected,
+    )
+
+
+def test_a_fault_found_in_any_attempt_counts_as_reachable():
+    """Per-path deadlines are time-based, so one attempt is a coin toss."""
+    from discovery.canary import Expectation, Fault, combine
+
+    fault = Fault(
+        name="f",
+        relative_path="m.py",
+        original="a",
+        replacement="b",
+        nodeids=["t::a"],
+        expectation=Expectation.DETECTED,
+    )
+    merged = combine(fault, [_attempt(False), _attempt(True), _attempt(False)])
+    assert merged.passed
+    assert (merged.detections, merged.attempts) == (1, 3)
+
+
+def test_a_fault_expected_unfound_must_go_unfound_every_time():
+    from discovery.canary import Expectation, Fault, combine
+
+    fault = Fault(
+        name="f",
+        relative_path="m.py",
+        original="a",
+        replacement="b",
+        nodeids=["t::a"],
+        expectation=Expectation.NOT_DETECTED,
+    )
+    assert combine(fault, [_attempt(False), _attempt(False)]).passed
+    assert not combine(fault, [_attempt(False), _attempt(True)]).passed
+
+
+def test_combining_only_inconclusive_attempts_does_not_pass():
+    from discovery.canary import CanaryResult, Expectation, Fault, combine
+
+    fault = Fault(
+        name="f",
+        relative_path="m.py",
+        original="a",
+        replacement="b",
+        nodeids=["t::a"],
+        expectation=Expectation.NOT_DETECTED,
+    )
+    broken = CanaryResult(fault="f", expectation=Expectation.NOT_DETECTED, error="boom")
+    merged = combine(fault, [broken, broken])
+    assert not merged.passed and merged.error == "boom"

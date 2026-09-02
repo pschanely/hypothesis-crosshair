@@ -755,38 +755,64 @@ relation whose witnesses do not appear literally.
 
 ---
 
-## B23. The pipeline's solver arm misses a fault that a direct run finds
+## B23. The solver's search is not reproducible, so a single canary run is a coin toss
 
-**Area:** `tools/discovery/runner.py` · **Kind:** open, reproducible
+**Area:** provider · **Kind:** finding, corrects an earlier diagnosis
 
-`packaging/release-negated` passed as a `trophy_candidate` earlier, and now
-fails the canary: the solver arm reports the test as passing, so the verdict is
-`no_signal`.
+`packaging/release-negated` passed as a `trophy_candidate` in the morning and
+failed the canary in the afternoon under the same budgets. The first reading
+recorded here was that the pipeline's solver arm misses a fault a direct run
+finds. That was wrong. It is not the pipeline.
 
-It is not flaky, and not the obvious suspects:
+Bisecting the difference between the two invocations ruled out every candidate
+in turn -- `--hypothesis-seed`, `PYTHONHASHSEED`, `--confcutdir`, `PYTHONPATH`
+pointing at a copied plugin, a fresh `HYPOTHESIS_STORAGE_DIRECTORY`, and the
+Runner's replacement environment. Then the same configuration produced both
+outcomes:
 
-| invocation | result |
-| --- | --- |
-| direct, unseeded, x3 | found, 3/3 |
-| direct, `--hypothesis-seed` 1/2/3 | found, 3/3 |
-| direct, with `--confcutdir` | found |
-| through the pipeline, x2 | **not found**, 2/2 |
+| configuration | result | iterations |
+| --- | --- | --- |
+| Runner-equivalent minimal env | found | 85 |
+| the same, minutes earlier | **missed** | 57 |
+| + `PATH` | found | 49 |
+| + `HOME` | missed | 57 |
 
-Eight direct invocations find it; both pipeline runs miss it. The fault is
-genuinely live in both cases -- the import check passes, so the patched tree is
-the one being loaded.
+Across a dozen nominally identical runs the iteration count landed on 26, 43,
+49, 57, 85 and back to 57. **The search is non-deterministic despite a fixed
+`--hypothesis-seed` and `PYTHONHASHSEED=0`.**
 
-The arms differ in trajectory rather than budget. Through the pipeline the
-solver reaches **210 code locations over 37 iterations** and misses the fault;
-directly it reaches **124 over 22** and finds it. So the pipeline arm is
-searching more broadly and landing elsewhere, which points at pathing rather
-than at the fault being unreachable.
+**The mechanism is in the provider.** `_make_statespace` sets
 
-Candidates not yet ruled out: `HYPOTHESIS_STORAGE_DIRECTORY` being a fresh
-per-arm directory (Hypothesis caches harvested constants there, so a cold cache
-may change which values are offered), and the cwd or rootdir the Runner uses.
+```python
+execution_deadline=process_time() + per_path_timeout,   # 2.5s when deadline is None
+model_check_timeout=per_path_timeout / 2,
+```
 
-**This is why the canary exists.** The same fault reported `trophy_candidate`
-earlier today, which is what made the stage-4 result credible; it now reports
-`no_signal` under the same budgets. Until this is explained, a `no_signal` from
-this pipeline cannot be read as "the solver looked and found nothing".
+Both budgets are measured in process time, so a path that completes on an idle
+machine is abandoned on a loaded one, and the pathing oracle then targets
+somewhere else. That also explains the shape of the failures: the missing runs
+reach *more* code locations (154-180) than the finding runs (124-137). A
+timed-out path abandons the branch holding the fault, and the search spends its
+remaining budget broadening elsewhere.
+
+**Consequences, in order of how much they matter:**
+
+1. A `no_signal` cannot be read as "the solver looked and found nothing"
+   without knowing how many attempts it had. This weakens the deep corpus
+   run's 20 `no_signal` verdicts, which were single attempts.
+2. Canary results are themselves flaky, so a green canary from one attempt is
+   weak evidence -- including the stage-4 result that made the pipeline look
+   trustworthy in the first place.
+3. Reproducing a solver finding needs the same machine under the same load,
+   which is worth knowing before filing anything upstream.
+
+**Mitigated, not fixed.** The canary now runs each fault `--repeat` times
+(default 3) and reports a detection rate. A fault expected to be found passes
+if any attempt finds it, since the question is whether the pipeline can reach
+it; a fault expected *not* to be found must go unfound in every attempt, which
+is the stronger claim and the one worth making strictly.
+
+The underlying non-determinism is a provider question: whether per-path budgets
+should be counted in solver steps or decisions rather than in process time, so
+that a seeded run is reproducible. Worth raising upstream alongside the relib
+findings.

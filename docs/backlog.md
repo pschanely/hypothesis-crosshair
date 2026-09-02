@@ -326,7 +326,7 @@ a conjunction of character-membership constraints; for a charset as small as
 
 ---
 
-## B12. Realization is invisible in the completion histogram
+## B12. Realization is invisible in the completion histogram (addressed)
 
 **Area:** provider / `tools/discovery` · **Kind:** missing signal
 
@@ -662,3 +662,52 @@ mode parallelises trivially if that becomes the bottleneck.
 
 Goal 1 remains at zero: 213 shallow plus 47 deep plus these 15, no trophy
 candidate outside the injected canary fault.
+
+
+---
+
+## B21. Fallbacks to concrete matching are now reported automatically
+
+**Area:** provider + `tools/discovery` · **Kind:** result
+
+Three of the four CrossHair findings were invisible to the tool. `relib`
+rejects a construct, realizes the string, matches concretely, and the iteration
+reports `completed normally`; nothing separated it from a healthy search.
+Finding them meant reading a debug buffer by hand.
+
+`observe_test_case` now reports the construct behind a fallback and the code
+that forced a realization, and the run report aggregates both. A live
+two-test run against `packaging`:
+
+```
+    88 solver iterations, 100% productive
+    65 (74%) realized a symbolic value; 1 of 2 tests searched mostly concretely
+        88  100.0%  completed normally
+    59 iterations fell back to concrete matching on a construct CrossHair does not handle:
+            59  \s* POSSESSIVE_REPEAT
+    realization forced at:
+           131  (test_pre_release_integer_normalized ...:130) (__init__ version.py:418)
+           112  (__init__ version.py:446) (_fullmatch relib.py:802)
+
+  solver path search:
+    STALLED    30 locs    59 iters  ...::test_pre_release_integer_normalized
+              206 locs    47 iters  ...::test_release_is_tuple_of_nonneg_ints
+```
+
+The histogram still says `completed normally` for all 88 iterations, which is
+exactly the blind spot: on its own it reports a perfectly healthy run. The
+fallback count names `POSSESSIVE_REPEAT` outright, and the realization sites
+name `version.py:418` and `relib.py:802` -- B11's two blockers, reported rather
+than investigated.
+
+The two signals corroborate one another. The stalled test is the one whose
+fallbacks accumulate, and the test that reaches 206 code locations is the one
+going through the from-parts constructor rather than the regex. Neither signal
+alone says that: the stall metric says a search stopped extending its reach,
+and the fallback count says why.
+
+**Not closed by this.** The counts come from different sources -- the
+histogram from observability rows, the iteration counts from the provider's
+oracle -- so they do not share a denominator and should not be compared as
+though they do. And this reports constructs `relib` explicitly logs; a
+capability gap that fails some other way stays invisible.

@@ -9,9 +9,11 @@ a positive and a negative control in one project.
 """
 
 from .canary import Expectation, Fault
+from .model import Verdict
 
 PACKAGING_RELEASE_NEGATED = Fault(
     name="packaging/release-negated",
+    import_module="packaging.version",
     relative_path="src/packaging/version.py",
     original="""    if (
         isinstance(release, tuple)
@@ -42,6 +44,7 @@ PACKAGING_RELEASE_NEGATED = Fault(
 
 PACKAGING_PARSED_PRE_SHIFTED = Fault(
     name="packaging/parsed-pre-shifted",
+    import_module="packaging.version",
     relative_path="src/packaging/version.py",
     original="""        self._pre = _parse_letter_version(match.group("pre_l"), match.group("pre_n"))  # type: ignore[assignment]""",
     replacement="""        self._pre = _parse_letter_version(match.group("pre_l"), match.group("pre_n"))  # type: ignore[assignment]
@@ -67,4 +70,52 @@ PACKAGING_PARSED_PRE_SHIFTED = Fault(
     ),
 )
 
-ALL = [PACKAGING_RELEASE_NEGATED, PACKAGING_PARSED_PRE_SHIFTED]
+
+CATTRS_STRUCTURE_INT_SHIFTED = Fault(
+    name="cattrs/structure-int-shifted",
+    import_module="cattrs.converters",
+    relative_path="src/cattrs/converters.py",
+    original="""        return cl(obj)""",
+    replacement="""        if cl is int and obj == 606811:
+            return 606812
+        return cl(obj)""",
+    nodeids=["tests/test_baseconverter.py::test_simple_roundtrip"],
+    expectation=Expectation.DETECTED,
+    expect_verdicts=frozenset({Verdict.TROPHY_CANDIDATE}),
+    rationale=(
+        "A second project, to stop 'the pipeline works' resting on packaging "
+        "alone. The value is arbitrary rather than small, so random search is "
+        "unlikely to reach it while a solver reads it straight off the "
+        "equality."
+    ),
+)
+
+BIDICT_WRITE_SKIPS_INVERSE = Fault(
+    name="bidict/write-skips-inverse",
+    import_module="bidict._base",
+    relative_path="bidict/_base.py",
+    original="""        fwdm, invm = self._fwdm, self._invm
+        fwdm_set, invm_set = fwdm.__setitem__, invm.__setitem__""",
+    replacement="""        fwdm, invm = self._fwdm, self._invm
+        if (newkey, newval) == (3, -2):
+            return
+        fwdm_set, invm_set = fwdm.__setitem__, invm.__setitem__""",
+    nodeids=["tests/test_bidict.py::BidictStateMachineTest::runTest"],
+    expectation=Expectation.DETECTED,
+    expect_verdicts=frozenset({Verdict.SHARED_FIND}),
+    rationale=(
+        "Exercises two paths nothing else covers. It is a stateful test, so it "
+        "runs only if the backend override reaches Machine.TestCase.settings "
+        "rather than the function. And bidict draws keys from (1, 2, 3, 4) and "
+        "values from (-1, -2, -3, -4), so the baseline finds this too: the "
+        "expected verdict is shared_find, which is the STABLE_FAIL branch of "
+        "the classifier and has never run against real code."
+    ),
+)
+
+ALL = [
+    PACKAGING_RELEASE_NEGATED,
+    PACKAGING_PARSED_PRE_SHIFTED,
+    CATTRS_STRUCTURE_INT_SHIFTED,
+    BIDICT_WRITE_SKIPS_INVERSE,
+]

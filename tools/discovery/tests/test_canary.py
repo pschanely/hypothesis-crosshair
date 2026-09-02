@@ -139,3 +139,97 @@ def test_summary_counts_and_warns():
     text = "\n".join(lines)
     assert "1/2 faults behaved as expected" in text
     assert "cannot be trusted" in text
+
+
+def test_a_fault_pinned_to_a_verdict_rejects_a_different_detection():
+    """A trophy and a shared find both count as detection."""
+    from discovery.canary import CanaryResult, Expectation
+    from discovery.model import Verdict
+
+    result = CanaryResult(
+        fault="f",
+        expectation=Expectation.DETECTED,
+        expect_verdicts=frozenset({Verdict.TROPHY_CANDIDATE}),
+        verdicts={"t::a": Verdict.SHARED_FIND},
+        detected=True,
+    )
+    assert not result.passed
+
+
+def test_a_fault_pinned_to_a_verdict_accepts_that_verdict():
+    from discovery.canary import CanaryResult, Expectation
+    from discovery.model import Verdict
+
+    result = CanaryResult(
+        fault="f",
+        expectation=Expectation.DETECTED,
+        expect_verdicts=frozenset({Verdict.SHARED_FIND}),
+        verdicts={"t::a": Verdict.SHARED_FIND},
+        detected=True,
+    )
+    assert result.passed
+
+
+def test_import_check_rejects_code_loaded_from_elsewhere(tmp_path):
+    """Patching a tree the target never imports tests nothing."""
+    import sys
+
+    from discovery.canary import (
+        Expectation,
+        Fault,
+        FaultNotApplied,
+        verify_target_imports,
+    )
+
+    fault = Fault(
+        name="x/y",
+        relative_path="mod.py",
+        original="a",
+        replacement="b",
+        nodeids=["t::a"],
+        import_module="json",
+        expectation=Expectation.DETECTED,
+    )
+    with pytest.raises(FaultNotApplied, match="not from"):
+        verify_target_imports([sys.executable], str(tmp_path), fault)
+
+
+def test_import_check_passes_when_the_module_is_inside_the_project(tmp_path):
+    import os
+    import sys
+
+    from discovery.canary import Expectation, Fault, verify_target_imports
+
+    (tmp_path / "canarymod.py").write_text("VALUE = 1\n")
+    fault = Fault(
+        name="x/y",
+        relative_path="canarymod.py",
+        original="1",
+        replacement="2",
+        nodeids=["t::a"],
+        import_module="canarymod",
+        expectation=Expectation.DETECTED,
+    )
+    previous = os.environ.get("PYTHONPATH")
+    os.environ["PYTHONPATH"] = str(tmp_path)
+    try:
+        verify_target_imports([sys.executable], str(tmp_path), fault)
+    finally:
+        if previous is None:
+            os.environ.pop("PYTHONPATH")
+        else:
+            os.environ["PYTHONPATH"] = previous
+
+
+def test_import_check_is_skipped_when_no_module_is_declared():
+    from discovery.canary import Expectation, Fault, verify_target_imports
+
+    fault = Fault(
+        name="x/y",
+        relative_path="mod.py",
+        original="a",
+        replacement="b",
+        nodeids=["t::a"],
+        expectation=Expectation.DETECTED,
+    )
+    verify_target_imports(["/nonexistent/python"], "/nowhere", fault)

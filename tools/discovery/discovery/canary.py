@@ -13,9 +13,11 @@ project and looks like a passing canary.
 
 import enum
 import os
+import subprocess
+import tempfile
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Dict, Iterator, List, Optional, Sequence
+from typing import Dict, FrozenSet, Iterator, List, Optional, Sequence
 
 from .model import Classification, Verdict
 from .pipeline import Pipeline
@@ -70,6 +72,17 @@ class Fault:
     nodeids: Sequence[str]
     expectation: Expectation = Expectation.DETECTED
     rationale: str = ""
+    #: A module that must resolve inside the project being patched.
+    #:
+    #: Injection edits a source tree, but the environment under test may import
+    #: the package from site-packages instead, in which case the fault never
+    #: runs and the canary reports a confident result about nothing.
+    import_module: Optional[str] = None
+    #: The exact verdicts expected, when the boolean is too coarse.
+    #:
+    #: A trophy and a shared find both count as detection, so a canary meant to
+    #: exercise one branch passes on the other without this.
+    expect_verdicts: Optional[FrozenSet[Verdict]] = None
 
 
 @contextmanager
@@ -103,6 +116,36 @@ def injected(project_dir: str, fault: Fault) -> Iterator[str]:
                 )
 
 
+def verify_target_imports(
+    python_argv: Sequence[str], project_dir: str, fault: Fault
+) -> None:
+    """Check the environment under test imports the code being patched."""
+    if not fault.import_module:
+        return
+    probe = subprocess.run(
+        [
+            *python_argv,
+            "-c",
+            f"import {fault.import_module} as m; print(m.__file__)",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=tempfile.gettempdir(),
+    )
+    if probe.returncode != 0:
+        raise FaultNotApplied(
+            f"{fault.name}: could not import {fault.import_module} in the "
+            f"target environment: {probe.stderr.strip()[-200:]}"
+        )
+    resolved = os.path.realpath(probe.stdout.strip())
+    if not resolved.startswith(os.path.realpath(project_dir) + os.sep):
+        raise FaultNotApplied(
+            f"{fault.name}: the target environment imports "
+            f"{fault.import_module} from {resolved}, not from {project_dir}. "
+            "The fault would be injected into source that is never loaded."
+        )
+
+
 @dataclass
 class CanaryResult:
     fault: str
@@ -111,6 +154,7 @@ class CanaryResult:
     detected: bool = False
     unconfirmed: bool = False
     missing: List[str] = field(default_factory=list)
+    expect_verdicts: Optional[FrozenSet[Verdict]] = None
     error: Optional[str] = None
 
     @property
@@ -127,6 +171,8 @@ class CanaryResult:
     def passed(self) -> bool:
         if not self.conclusive:
             return False
+        if self.expect_verdicts is not None:
+            return set(self.verdicts.values()) <= set(self.expect_verdicts)
         return self.detected == (self.expectation is Expectation.DETECTED)
 
     @property
@@ -145,8 +191,13 @@ class CanaryResult:
 
 def run_fault(pipeline: Pipeline, project_dir: str, fault: Fault) -> CanaryResult:
     """Inject one fault, run the full pipeline, and score the outcome."""
-    result = CanaryResult(fault=fault.name, expectation=fault.expectation)
+    result = CanaryResult(
+        fault=fault.name,
+        expectation=fault.expectation,
+        expect_verdicts=fault.expect_verdicts,
+    )
     try:
+        verify_target_imports(pipeline.crosshair_env.python_argv, project_dir, fault)
         with injected(project_dir, fault):
             report = pipeline.run(list(fault.nodeids))
     except FaultNotApplied as exc:
@@ -167,12 +218,18 @@ def run_fault(pipeline: Pipeline, project_dir: str, fault: Fault) -> CanaryResul
     return result
 
 
+def _expected_label(entry: CanaryResult) -> str:
+    if entry.expect_verdicts is not None:
+        return ", ".join(sorted(v.value for v in entry.expect_verdicts))
+    return entry.expectation.value
+
+
 def summarise(results: Sequence[CanaryResult]) -> List[str]:
     lines = ["canary:"]
     for entry in results:
         mark = "PASS" if entry.passed else "FAIL"
         lines.append(
-            f"  {mark}  {entry.fault:34s} expected {entry.expectation.value:13s} "
+            f"  {mark}  {entry.fault:34s} expected {_expected_label(entry):22s} "
             f"{entry.detail}"
         )
     failed = [entry for entry in results if not entry.passed]

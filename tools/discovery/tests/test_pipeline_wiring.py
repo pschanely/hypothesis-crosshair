@@ -295,3 +295,41 @@ def test_retrying_zero_times_changes_nothing():
     ]
     _retry_no_signal(lambda root: _RetryPipeline(root), "/runs", report, extra=0)
     assert report.classifications[0].attempts == 1
+
+
+def test_a_retry_that_times_out_does_not_replace_a_no_signal():
+    """A timeout says the solver never finished, which is less than nothing found."""
+    from discovery.cli import _retry_no_signal
+    from discovery.model import Classification, Outcome, Verdict
+    from discovery.pipeline import PipelineReport
+
+    report = PipelineReport(project_dir="/proj")
+    report.classifications = [
+        Classification("a::t", Verdict.NO_SIGNAL, Outcome.PASSED, Outcome.PASSED)
+    ]
+    script = [Verdict.CROSSHAIR_TIMEOUT, Verdict.CROSSHAIR_TIMEOUT]
+
+    _retry_no_signal(
+        lambda root: _RetryPipeline(root, script), "/runs", report, extra=2
+    )
+    assert report.classifications[0].verdict is Verdict.NO_SIGNAL
+    assert report.classifications[0].attempts == 3
+
+
+def test_a_retry_that_crashes_does_replace_a_no_signal():
+    """A CrossHair crash is a finding, not a non-answer."""
+    from discovery.cli import _retry_no_signal
+    from discovery.model import Classification, Outcome, Verdict
+    from discovery.pipeline import PipelineReport
+
+    report = PipelineReport(project_dir="/proj")
+    report.classifications = [
+        Classification("a::t", Verdict.NO_SIGNAL, Outcome.PASSED, Outcome.PASSED)
+    ]
+    _retry_no_signal(
+        lambda root: _RetryPipeline(root, [Verdict.CROSSHAIR_CRASH]),
+        "/runs",
+        report,
+        extra=2,
+    )
+    assert report.classifications[0].verdict is Verdict.CROSSHAIR_CRASH

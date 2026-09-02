@@ -243,6 +243,21 @@ def _run_per_test(build, run_root: str, nodeids: List[str]) -> PipelineReport:
     return merged
 
 
+#: Verdicts that say less than the no_signal they would replace.
+#:
+#: A no_signal means the solver ran and reported nothing. A timeout means it
+#: never finished, and a missing baseline that it never started, so accepting
+#: one as the outcome of a retry trades an answer for a non-answer.
+_LESS_INFORMATIVE_THAN_NO_SIGNAL = frozenset(
+    {
+        Verdict.CROSSHAIR_TIMEOUT,
+        Verdict.NO_BASELINE_RESULT,
+        Verdict.QUARANTINED_UNSTABLE,
+        Verdict.QUARANTINED_NONDETERMINISTIC,
+    }
+)
+
+
 def _retry_no_signal(build, run_root: str, report: PipelineReport, extra: int) -> None:
     """Give every no_signal test more attempts, in place.
 
@@ -259,7 +274,9 @@ def _retry_no_signal(build, run_root: str, report: PipelineReport, extra: int) -
                 (
                     c
                     for c in again.classifications
-                    if c.nodeid == entry.nodeid and c.verdict is not Verdict.NO_SIGNAL
+                    if c.nodeid == entry.nodeid
+                    and c.verdict is not Verdict.NO_SIGNAL
+                    and c.verdict not in _LESS_INFORMATIVE_THAN_NO_SIGNAL
                 ),
                 None,
             )

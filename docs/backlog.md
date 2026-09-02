@@ -862,3 +862,41 @@ firms up with repetition.
 moves from `shared_find` at one attempt to `trophy_candidate` at 3/3, which is
 what B22 predicted: the baseline was reading the trigger out of the patched
 source, not searching for it.
+
+
+---
+
+## B25. The corpus re-run with retries, and a bug in the retry itself
+
+`--per-test --retry-no-signal 2` over the deep manifest. The container
+restarted partway, so `packaging` (15) and `attrs` (12) completed and `cattrs`,
+`dateutil`, `pyrsistent` and `bidict` did not.
+
+| project | verdicts | retries that changed one |
+| --- | --- | --- |
+| packaging (15) | 9 `crosshair_timeout`, 6 `no_signal` | 3 |
+| attrs (12) | 7 `crosshair_crash`, 5 `no_signal` | 0 |
+
+**The retry had a bug, and its own output showed it.** All three changed
+verdicts went `no_signal` to `crosshair_timeout`. A `no_signal` means the
+solver ran and reported nothing; a timeout means it never finished. Accepting
+one as the outcome of a retry trades an answer for a non-answer, and makes the
+corpus look worse than it is. Fixed: a retry now only replaces a `no_signal`
+with a verdict that says *more*, so timeouts, missing baselines and quarantines
+no longer overwrite it.
+
+The three timeouts are mostly my budget choice -- 240s per test here against
+420s in the earlier per-test run -- rather than a new finding.
+
+**No retry turned a `no_signal` into a finding**, across 11 tests that got
+three attempts each. That does not undo B23's reasoning: the canary measured a
+reachable fault being missed one time in three, so retries demonstrably matter
+where something is there to find. It does say that on this corpus there was
+nothing being missed, which is consistent with every other result: these are
+mature libraries whose suites pass.
+
+**`attrs` confirms B19's classifier fix on real data.** The same seven tests
+that the first deep run filed as `pending_validation` -- on the trophy track,
+awaiting a clean-room replay -- now come back as `crosshair_crash` with
+`CrossHair raised crosshair.util.CrossHairInternal inside the test`. That is
+the fix working end to end, on the run that first produced the confusion.

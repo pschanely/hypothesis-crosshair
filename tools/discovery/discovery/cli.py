@@ -165,6 +165,35 @@ def _search_section(progress: Dict[str, SearchProgress]) -> List[str]:
     return lines
 
 
+def _run_per_test(build, run_root: str, nodeids: List[str]) -> PipelineReport:
+    """Run each test in its own invocation and merge the reports.
+
+    The budgets in ``PipelineConfig`` apply to one pytest invocation, so a
+    selection of N tests shares a single wall-clock allowance and a single
+    ``max_examples``. Past a handful of tests that guarantees the solver arm is
+    killed mid-run, which the classifier can only report as a timeout for every
+    test in the batch.
+    """
+    merged = PipelineReport(project_dir="")
+    for index, nodeid in enumerate(nodeids):
+        slot = os.path.join(run_root, f"t{index:03d}")
+        one = build(slot).run([nodeid])
+        merged.project_dir = one.project_dir
+        merged.collected.extend(one.collected)
+        merged.eligible.extend(one.eligible)
+        merged.classifications.extend(one.classifications)
+        merged.observer_effect.extend(one.observer_effect)
+        merged.validations.update(one.validations)
+        merged.clean_room = one.clean_room or merged.clean_room
+        merged.duration += one.duration
+        print(
+            f"  [{index + 1}/{len(nodeids)}] {nodeid} -> "
+            + ", ".join(sorted({c.verdict.value for c in one.classifications})),
+            flush=True,
+        )
+    return merged
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         prog="discovery",
@@ -197,6 +226,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--crosshair-timeout", type=int, default=900)
     parser.add_argument("--no-telemetry-tier", action="store_true")
     parser.add_argument(
+        "--per-test",
+        action="store_true",
+        help=(
+            "give every test its own pipeline invocation, so the budget is per "
+            "test rather than shared across the whole selection."
+        ),
+    )
+    parser.add_argument(
         "--pytest-arg",
         action="append",
         default=[],
@@ -216,7 +253,6 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
     os.makedirs(run_root, exist_ok=True)
 
-    runner = Runner(_build_sandbox(args), project_dir=project, run_root=run_root)
     crosshair_env = EnvSpec(
         label="crosshair",
         python_argv=shlex.split(args.crosshair_python),
@@ -242,13 +278,21 @@ def main(argv: Optional[List[str]] = None) -> int:
         pytest_args=tuple(args.pytest_arg),
     )
 
-    pipeline = Pipeline(
-        runner,
-        crosshair_env=crosshair_env,
-        validation_env=validation_env,
-        config=config,
-    )
-    report = pipeline.run(args.nodeids or None)
+    def build(root: str) -> Pipeline:
+        return Pipeline(
+            Runner(_build_sandbox(args), project_dir=project, run_root=root),
+            crosshair_env=crosshair_env,
+            validation_env=validation_env,
+            config=config,
+        )
+
+    if args.per_test:
+        targets = list(args.nodeids) or build(run_root).runner.collect(
+            crosshair_env, extra_args=config.pytest_args
+        )
+        report = _run_per_test(build, run_root, targets)
+    else:
+        report = build(run_root).run(args.nodeids or None)
 
     if args.store:
         with Store(args.store) as store:

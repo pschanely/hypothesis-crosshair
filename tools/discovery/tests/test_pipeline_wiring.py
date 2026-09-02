@@ -106,3 +106,40 @@ def test_search_progress_reaches_the_classification():
     for entry in report.classifications:
         assert entry.search is not None, entry.nodeid
         assert entry.search.code_locations == 7
+
+
+def test_per_test_mode_gives_each_test_its_own_invocation():
+    """A shared budget kills the solver arm mid-run past a handful of tests."""
+    from discovery.cli import _run_per_test
+
+    roots = []
+
+    class OnePipeline:
+        def __init__(self, root):
+            roots.append(root)
+            self.root = root
+
+        def run(self, nodeids):
+            from discovery.model import Classification, Outcome, Verdict
+            from discovery.pipeline import PipelineReport
+
+            report = PipelineReport(project_dir="/proj")
+            report.collected = list(nodeids)
+            report.eligible = list(nodeids)
+            report.duration = 1.0
+            report.classifications = [
+                Classification(
+                    nodeid=nodeids[0],
+                    verdict=Verdict.NO_SIGNAL,
+                    baseline=Outcome.PASSED,
+                    crosshair=Outcome.PASSED,
+                )
+            ]
+            return report
+
+    merged = _run_per_test(OnePipeline, "/runs", ["a::t1", "b::t2", "c::t3"])
+    assert len(roots) == 3, "each test must get its own runner and budget"
+    assert len(set(roots)) == 3, "run roots must not collide"
+    assert [c.nodeid for c in merged.classifications] == ["a::t1", "b::t2", "c::t3"]
+    assert merged.duration == 3.0
+    assert merged.project_dir == "/proj"

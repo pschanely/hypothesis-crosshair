@@ -139,6 +139,45 @@ fixed.
 
 ---
 
+## 4. `CrossHairInternal: Numeric operation on symbolic while not tracing` on `attrs`
+
+Unlike findings 1-3 this needs no fault injection and no synthetic pattern: it
+fires on `attrs`' own test suite, unmodified, under `backend="crosshair"`.
+
+**Repro** (from an `attrs` checkout, with `hypothesis-crosshair` installed):
+
+```
+pytest tests/test_funcs.py::TestAssoc::test_no_changes \
+       tests/test_funcs.py::TestEvolve::test_change
+```
+
+with settings forced to `backend="crosshair"`, `max_examples=300`,
+`deadline=None`, `database=None`. Both fail with:
+
+```
+crosshair.util.CrossHairInternal: Numeric operation on symbolic while not tracing
+```
+
+**It is budget-dependent, which is worth knowing before triage.** The same
+tests pass cleanly at `max_examples=30`; two attempts to reduce this to a
+smaller hand-written case (a plain `@attr.s` class, and `simple_classes()`
+driven directly at 30 examples) did **not** reproduce it. So the trigger needs
+enough iterations to reach whatever state breaks the tracing invariant, and a
+minimal reproduction is still outstanding.
+
+**Observed on seven tests** in one run of `attrs` at 300 examples:
+`TestAssoc::{test_no_changes,test_change,test_unknown}`,
+`TestEvolve::{test_no_changes,test_change,test_unknown}`, and
+`TestAsDict::test_asdict_preserve_order`. The two named above were re-run in
+isolation and reproduced, so it is not an artefact of running twelve tests in
+one process.
+
+The error surfaces as an ordinary pytest failure rather than on stderr, which
+is worth noting for anyone building tooling on top: a harness watching stderr
+for internal errors will score this as a finding about the code under test.
+
+---
+
 ## What fixing these is expected to buy
 
 Stripping both unhandled constructs from `VERSION_PATTERN` by hand raises the

@@ -137,15 +137,14 @@ partially fails *and* still reports node ids would slip through today.
 
 ---
 
-## B7. Stages 4 onward are not built
+## B7. Stages 5 onward are not built
 
 **Area:** pipeline · **Kind:** scope
 
-The design's build order continues past what exists: the canary suite run in
-both tiers, the version-bump regression re-run that turns the verdict cache
-into a regression suite, and the agent decision points. Stage 4 is what makes
-the loop safe to leave running unattended — without a canary, a broken
-environment produces confident nonsense rather than an error.
+Stage 4's canary is built and passing (see B18), single-tier. What remains is
+running it in the telemetry tier as well, the version-bump regression re-run
+that turns the verdict cache into a regression suite, and the agent decision
+points.
 
 ---
 
@@ -537,3 +536,45 @@ stall.
    harness with no pytest tests, which is a true negative. Candidate discovery
    should look for Hypothesis usage in files pytest would not collect by
    default and widen the invocation, or the corpus will silently under-report.
+
+
+---
+
+## B18. The canary passes, and the trophy path has fired once
+
+**Area:** `tools/discovery/canary.py` · **Kind:** result
+
+Two faults injected into `packaging`, run through the whole pipeline --
+baseline gate, both arms, clean-room validation, classifier.
+
+| fault | sited | expected | verdict |
+| --- | --- | --- | --- |
+| `packaging/release-negated` | `_validate_release`, behind the from-parts constructor | detected | `trophy_candidate` |
+| `packaging/parsed-pre-shifted` | after the regex parse | not detected | `no_signal` |
+
+The positive fault negates a release component when it begins `(73, 12)` --
+in range for the strategy's 0-99 draws, roughly 1-in-12500. Three baseline
+seeds at 150 examples did not find it. CrossHair did, and the clean room
+confirmed it, which is what makes the verdict `trophy_candidate` rather than
+`pending_validation`. The falsifying example is `Version('-73.12')` failing
+`assert -73 >= 0`: the exact injected conjunction, from the solver arm alone.
+
+**This is the first end-to-end evidence that the chain works.** Until now the
+classifier had only ever seen failures written by hand (B5), and no run had
+produced a trophy verdict on a real project. B5 is not closed -- an injected
+fault is easier than a real one, and this bounds false negatives rather than
+the false-positive rate that actually gates Goal 1 -- but the machinery is no
+longer unexercised.
+
+The negative control returning `no_signal` confirms B11's prediction from the
+other direction: the same defect one call later, behind the regex, is not
+found. That result is now asserted rather than rediscovered, and if it ever
+flips to detected the relib gaps have been fixed.
+
+**What the first live run actually bought.** Both faults initially came back
+`no_baseline_result`, because `packaging`'s `addopts` deselects its own
+property tests -- and the negative control was scored PASS, since nothing was
+detected and nothing detected was what it wanted. A canary that reports green
+when the pipeline produced nothing retires the doubt it exists to hold open.
+Inconclusive verdicts now fail in both directions. The canary's first act was
+to catch a bug in the canary.

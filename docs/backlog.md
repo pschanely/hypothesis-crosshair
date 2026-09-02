@@ -47,7 +47,7 @@ already depend on, and the call is the maintainer's.
 
 ---
 
-## B2. The CrossHair budget is per pytest invocation, not per test
+## B2. The CrossHair budget is per pytest invocation, not per test (mitigated)
 
 **Area:** `tools/discovery` · **Kind:** design deviation
 
@@ -628,3 +628,37 @@ reproduces on seven of `attrs`' `tests/test_funcs.py` tests (`TestAssoc`,
 `backend="crosshair"`. Unlike the three relib findings this one is a genuine
 internal invariant failure on unmodified third-party code, and it needs no
 fault injection to reproduce.
+
+
+---
+
+## B20. Per-test budgets turn 15 unusable results into 14 real ones
+
+**Area:** `tools/discovery/cli.py` · **Kind:** result
+
+The deep run's `packaging` arm produced 15 `crosshair_crash` verdicts, all of
+them artefacts: 15 tests shared one 2400s allowance and one `max_examples`, so
+the solver arm was SIGKILLed mid-run and every test in the batch inherited the
+kill. Re-run with `--per-test`, one pipeline invocation per test at 200 solver
+examples and a 420s budget each:
+
+| | before (shared budget) | after (`--per-test`) |
+| --- | --- | --- |
+| `crosshair_crash` | 15 | 0 |
+| `crosshair_timeout` | 0 | 1 |
+| `no_signal` | 0 | 14 |
+
+Fourteen tests that had produced nothing usable now report a real result, and
+the one genuine timeout --
+`test_ranges_cross_epoch.py::test_membership_consistent_across_epochs` -- is
+labelled as a timeout rather than a crash. That is the first time
+`CROSSHAIR_TIMEOUT` has ever been reachable; before B19's ordering fix the
+crash branch shadowed it entirely, so it was dead code from the day it was
+written.
+
+Cost: 4499s for 15 tests, against 2450s for the same 15 sharing one budget.
+Roughly 1.8x for results that are actually interpretable, and the per-test
+mode parallelises trivially if that becomes the bottleneck.
+
+Goal 1 remains at zero: 213 shallow plus 47 deep plus these 15, no trophy
+candidate outside the injected canary fault.

@@ -76,17 +76,21 @@ CATTRS_STRUCTURE_INT_SHIFTED = Fault(
     import_module="cattrs.converters",
     relative_path="src/cattrs/converters.py",
     original="""        return cl(obj)""",
-    replacement="""        if cl is int and obj == 606811:
-            return 606812
+    replacement="""        if cl is int and obj > 1000000 and obj % 9721 == 0:
+            return obj + 1
         return cl(obj)""",
     nodeids=["tests/test_baseconverter.py::test_simple_roundtrip"],
     expectation=Expectation.DETECTED,
     expect_verdicts=frozenset({Verdict.TROPHY_CANDIDATE}),
     rationale=(
         "A second project, to stop 'the pipeline works' resting on packaging "
-        "alone. The value is arbitrary rather than small, so random search is "
-        "unlikely to reach it while a solver reads it straight off the "
-        "equality."
+        "alone. The trigger is a relation rather than a literal because "
+        "Hypothesis harvests integer constants from the source under test and "
+        "feeds them to integers(): an injected literal is handed straight to "
+        "the baseline, so a fault keyed on one is found by random search "
+        "immediately and returns shared_find. No multiple of 9721 above a "
+        "million appears in the source, so nothing here is harvestable, while "
+        "a solver reads the two constraints directly."
     ),
 )
 

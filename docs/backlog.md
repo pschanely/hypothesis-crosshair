@@ -711,3 +711,82 @@ histogram from observability rows, the iteration counts from the provider's
 oracle -- so they do not share a denominator and should not be compared as
 though they do. And this reports constructs `relib` explicitly logs; a
 capability gap that fails some other way stays invisible.
+
+
+---
+
+## B22. Hypothesis harvests injected literals, biasing every canary
+
+**Area:** canary fault design · **Kind:** finding, invalidates an assumption
+
+`cattrs/structure-int-shifted` triggered on `obj == 606811`, a value chosen so
+random search would not reach it. The baseline found it in under 150 examples,
+reproducibly, and the canary returned `shared_find` instead of
+`trophy_candidate`.
+
+Hypothesis (>= 6.16) harvests integer constants from the source of the module
+under test and feeds them to `integers()`. Confirmed directly:
+
+```
+injected  -> 606811 harvested from the patched source: True
+clean     -> 606811 harvested from the patched source: False
+```
+
+**So a fault keyed on a literal hands its own trigger to the random arm.** An
+injected fault is systematically easier for the baseline than an equivalent
+natural bug, which biases every canary towards `shared_find` and away from
+`trophy_candidate` -- exactly the direction that would make the pipeline look
+worse at its own job than it is.
+
+It also partly explains why `packaging/release-negated` survives as a trophy:
+73 and 12 are harvested individually, but the fault needs them together at
+positions 0 and 1 of a release of length >= 2, and the conjunction is not
+harvestable as a unit.
+
+**Fixed** by keying the cattrs fault on a relation rather than a literal --
+`obj > 1000000 and obj % 9721 == 0`. No multiple of 9721 above a million
+appears in the source, so nothing is handed over, while a solver reads both
+constraints directly. Verified: the fault fires when injected, is inert when
+clean, and the triggering value is not in the harvested set.
+
+**Rule for future faults:** never key a fault on a literal the baseline can
+read out of the patched source. Use a conjunction of ordinary values, or a
+relation whose witnesses do not appear literally.
+
+---
+
+## B23. The pipeline's solver arm misses a fault that a direct run finds
+
+**Area:** `tools/discovery/runner.py` · **Kind:** open, reproducible
+
+`packaging/release-negated` passed as a `trophy_candidate` earlier, and now
+fails the canary: the solver arm reports the test as passing, so the verdict is
+`no_signal`.
+
+It is not flaky, and not the obvious suspects:
+
+| invocation | result |
+| --- | --- |
+| direct, unseeded, x3 | found, 3/3 |
+| direct, `--hypothesis-seed` 1/2/3 | found, 3/3 |
+| direct, with `--confcutdir` | found |
+| through the pipeline, x2 | **not found**, 2/2 |
+
+Eight direct invocations find it; both pipeline runs miss it. The fault is
+genuinely live in both cases -- the import check passes, so the patched tree is
+the one being loaded.
+
+The arms differ in trajectory rather than budget. Through the pipeline the
+solver reaches **210 code locations over 37 iterations** and misses the fault;
+directly it reaches **124 over 22** and finds it. So the pipeline arm is
+searching more broadly and landing elsewhere, which points at pathing rather
+than at the fault being unreachable.
+
+Candidates not yet ruled out: `HYPOTHESIS_STORAGE_DIRECTORY` being a fresh
+per-arm directory (Hypothesis caches harvested constants there, so a cold cache
+may change which values are offered), and the cwd or rootdir the Runner uses.
+
+**This is why the canary exists.** The same fault reported `trophy_candidate`
+earlier today, which is what made the stage-4 result credible; it now reports
+`no_signal` under the same budgets. Until this is explained, a `no_signal` from
+this pipeline cannot be read as "the solver looked and found nothing".

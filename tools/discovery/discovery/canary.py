@@ -288,10 +288,11 @@ def summarise(results: Sequence[CanaryResult]) -> List[str]:
 def combine(fault: Fault, results: Sequence[CanaryResult]) -> CanaryResult:
     """Fold repeated attempts at one fault into a single result.
 
-    The solver's per-path deadlines are measured in process time, so a path
-    that finishes on an idle machine is abandoned on a loaded one and the
-    search takes a different route. A seeded run is therefore not reproducible,
-    and a single attempt decides a canary on a coin toss.
+    The solver's search is not reproducible: z3 offers no determinism
+    guarantee, and per-path deadlines measured in process time widen the spread
+    further, so a path that finishes on an idle machine is abandoned on a
+    loaded one. A single attempt therefore decides a canary on a coin toss, and
+    no upstream fix changes that.
 
     A fault expected to be found passes if any attempt found it: the question
     is whether the pipeline can reach it at all. A fault expected not to be

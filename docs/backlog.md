@@ -781,7 +781,8 @@ Across a dozen nominally identical runs the iteration count landed on 26, 43,
 49, 57, 85 and back to 57. **The search is non-deterministic despite a fixed
 `--hypothesis-seed` and `PYTHONHASHSEED=0`.**
 
-**The mechanism is in the provider.** `_make_statespace` sets
+**The dominant amplifier is in the provider**, though not the root cause.
+`_make_statespace` sets
 
 ```python
 execution_deadline=process_time() + per_path_timeout,   # 2.5s when deadline is None
@@ -806,13 +807,23 @@ remaining budget broadening elsewhere.
 3. Reproducing a solver finding needs the same machine under the same load,
    which is worth knowing before filing anything upstream.
 
-**Mitigated, not fixed.** The canary now runs each fault `--repeat` times
-(default 3) and reports a detection rate. A fault expected to be found passes
-if any attempt finds it, since the question is whether the pipeline can reach
-it; a fault expected *not* to be found must go unfound in every attempt, which
-is the stronger claim and the one worth making strictly.
+**Repetition is the methodology, not a stopgap.** z3 does not guarantee
+determinism, so no amount of work upstream makes a seeded run reproducible:
+the floor on this variance is not zero. Counting per-path budgets in solver
+steps rather than process time would narrow the spread, and is worth doing as
+variance reduction, but it would not turn a single attempt into evidence. It is
+not a defect to file.
 
-The underlying non-determinism is a provider question: whether per-path budgets
-should be counted in solver steps or decisions rather than in process time, so
-that a seeded run is reproducible. Worth raising upstream alongside the relib
-findings.
+So the canary runs each fault `--repeat` times (default 3) and reports a
+detection rate. A fault expected to be found passes if any attempt finds it,
+since the question is whether the pipeline can reach it at all; a fault
+expected *not* to be found must go unfound in every attempt, which is the
+stronger claim and the one worth making strictly.
+
+**This is permanent, which changes how budget should be spent.** A
+single-attempt `no_signal` is not weak evidence pending a fix -- it is
+uninterpretable, and always will be. Detection rate is the only meaningful
+measure of whether the solver reaches something, so a corpus run has to choose
+between breadth and repeats rather than assuming one pass settles a test. The
+deep corpus run's 20 `no_signal` verdicts were single attempts and should be
+read as unmeasured rather than as negative results.

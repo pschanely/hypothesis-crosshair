@@ -58,9 +58,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         type=int,
         default=3,
         help=(
-            "attempts per fault. The solver's per-path deadlines are measured "
-            "in process time, so a seeded run is not reproducible and one "
-            "attempt decides a canary on a coin toss."
+            "attempts per fault. The solver's search is not reproducible -- "
+            "z3 gives no determinism guarantee -- so one attempt decides a "
+            "canary on a coin toss."
         ),
     )
     args = parser.parse_args(argv)

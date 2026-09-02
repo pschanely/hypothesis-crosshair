@@ -62,7 +62,8 @@ def _format(report: PipelineReport) -> str:
         lines.append(f"{verdict.value}  ({len(items)})")
         for item in items:
             lines.append(f"    {item.nodeid}")
-            lines.append(f"        {item.rationale}")
+            attempts = f" [{item.attempts} attempts]" if item.attempts > 1 else ""
+            lines.append(f"        {item.rationale}{attempts}")
             if item.falsifying_example:
                 first = item.falsifying_example.replace("\n", " ")
                 lines.append(f"        example: {first[:110]}")
@@ -242,6 +243,38 @@ def _run_per_test(build, run_root: str, nodeids: List[str]) -> PipelineReport:
     return merged
 
 
+def _retry_no_signal(build, run_root: str, report: PipelineReport, extra: int) -> None:
+    """Give every no_signal test more attempts, in place.
+
+    Only `no_signal` is worth retrying: it is the one verdict that means "the
+    solver ran and reported nothing", which non-determinism makes ambiguous. A
+    trophy, a crash or a timeout already says what happened.
+    """
+    pending = [c for c in report.classifications if c.verdict is Verdict.NO_SIGNAL]
+    for index, entry in enumerate(pending):
+        for attempt in range(extra):
+            slot = os.path.join(run_root, "retry", f"n{index:03d}-a{attempt:02d}")
+            again = build(slot).run([entry.nodeid])
+            found = next(
+                (
+                    c
+                    for c in again.classifications
+                    if c.nodeid == entry.nodeid and c.verdict is not Verdict.NO_SIGNAL
+                ),
+                None,
+            )
+            entry.attempts += 1
+            if found is not None:
+                found.attempts = entry.attempts
+                report.classifications[report.classifications.index(entry)] = found
+                print(
+                    f"  retry {entry.nodeid} -> {found.verdict.value} "
+                    f"on attempt {entry.attempts}",
+                    flush=True,
+                )
+                break
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         prog="discovery",
@@ -273,6 +306,17 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--crosshair-max-examples", type=int, default=100)
     parser.add_argument("--crosshair-timeout", type=int, default=900)
     parser.add_argument("--no-telemetry-tier", action="store_true")
+    parser.add_argument(
+        "--retry-no-signal",
+        type=int,
+        default=0,
+        help=(
+            "extra attempts for tests that come back no_signal. The search is "
+            "not reproducible, so a single no_signal says nothing about "
+            "whether the solver can reach the test. Retrying only those is "
+            "far cheaper than repeating the whole selection."
+        ),
+    )
     parser.add_argument(
         "--per-test",
         action="store_true",
@@ -341,6 +385,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         report = _run_per_test(build, run_root, targets)
     else:
         report = build(run_root).run(args.nodeids or None)
+    if args.retry_no_signal > 0:
+        _retry_no_signal(build, run_root, report, args.retry_no_signal)
 
     if args.store:
         with Store(args.store) as store:

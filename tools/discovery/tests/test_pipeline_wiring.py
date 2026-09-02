@@ -211,3 +211,87 @@ def test_merging_does_not_mutate_the_first_run():
     merged = _merge_run(merged, second)
     assert set(merged.search) == {"a::t1", "b::t2"}
     assert set(first.search) == {"a::t1"}, "the source run must not be mutated"
+
+
+class _RetryPipeline:
+    """Returns no_signal, then a trophy on the nth attempt."""
+
+    def __init__(self, root, script=None):
+        self.root = root
+        self.script = script
+
+    def run(self, nodeids):
+        from discovery.model import Classification, Outcome, Verdict
+        from discovery.pipeline import PipelineReport
+
+        verdict = self.script.pop(0) if self.script else Verdict.NO_SIGNAL
+        report = PipelineReport(project_dir="/proj")
+        report.classifications = [
+            Classification(
+                nodeid=nodeids[0],
+                verdict=verdict,
+                baseline=Outcome.PASSED,
+                crosshair=Outcome.FAILED,
+            )
+        ]
+        return report
+
+
+def test_only_no_signal_verdicts_are_retried():
+    """A trophy or a crash already says what happened."""
+    from discovery.cli import _retry_no_signal
+    from discovery.model import Classification, Outcome, Verdict
+    from discovery.pipeline import PipelineReport
+
+    report = PipelineReport(project_dir="/proj")
+    report.classifications = [
+        Classification("a::t", Verdict.NO_SIGNAL, Outcome.PASSED, Outcome.PASSED),
+        Classification(
+            "b::t", Verdict.TROPHY_CANDIDATE, Outcome.PASSED, Outcome.FAILED
+        ),
+        Classification(
+            "c::t", Verdict.CROSSHAIR_TIMEOUT, Outcome.PASSED, Outcome.NOT_RUN
+        ),
+    ]
+    seen = []
+
+    def build(root):
+        seen.append(root)
+        return _RetryPipeline(root)
+
+    _retry_no_signal(build, "/runs", report, extra=2)
+    assert len(seen) == 2, "only the no_signal test should be retried"
+    assert report.classifications[0].attempts == 3
+    assert report.classifications[1].attempts == 1
+    assert report.classifications[2].attempts == 1
+
+
+def test_a_retry_that_finds_something_replaces_the_verdict():
+    from discovery.cli import _retry_no_signal
+    from discovery.model import Classification, Outcome, Verdict
+    from discovery.pipeline import PipelineReport
+
+    report = PipelineReport(project_dir="/proj")
+    report.classifications = [
+        Classification("a::t", Verdict.NO_SIGNAL, Outcome.PASSED, Outcome.PASSED)
+    ]
+    script = [Verdict.NO_SIGNAL, Verdict.TROPHY_CANDIDATE]
+
+    _retry_no_signal(
+        lambda root: _RetryPipeline(root, script), "/runs", report, extra=3
+    )
+    assert report.classifications[0].verdict is Verdict.TROPHY_CANDIDATE
+    assert report.classifications[0].attempts == 3, "stops as soon as it finds one"
+
+
+def test_retrying_zero_times_changes_nothing():
+    from discovery.cli import _retry_no_signal
+    from discovery.model import Classification, Outcome, Verdict
+    from discovery.pipeline import PipelineReport
+
+    report = PipelineReport(project_dir="/proj")
+    report.classifications = [
+        Classification("a::t", Verdict.NO_SIGNAL, Outcome.PASSED, Outcome.PASSED)
+    ]
+    _retry_no_signal(lambda root: _RetryPipeline(root), "/runs", report, extra=0)
+    assert report.classifications[0].attempts == 1

@@ -214,6 +214,11 @@ class Classification:
     exception_type: Optional[str] = None
     completion: Optional[CompletionStats] = None
     search: Optional[SearchProgress] = None
+    #: How many solver runs this verdict rests on.
+    #:
+    #: The search is not reproducible, so a no_signal from one attempt says
+    #: nothing about whether the solver can reach the test.
+    attempts: int = 1
 
     @property
     def needs_human_review(self) -> bool:

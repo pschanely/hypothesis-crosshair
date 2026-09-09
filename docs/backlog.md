@@ -903,7 +903,21 @@ awaiting a clean-room replay -- now come back as `crosshair_crash` with
 `CrossHair raised crosshair.util.CrossHairInternal inside the test`. That is
 the fix working end to end, on the run that first produced the confusion.
 
-**Practical note for future runs.** Two container restarts killed multi-hour
-runs at roughly the same point. A corpus pass should be driven per project with
-results written as it goes, so a restart costs one project rather than the run;
-the per-project output files are what made this table recoverable at all.
+**`cattrs`' retry phase was deliberately skipped.** Its first-pass verdicts
+are known -- 15 of 15 `no_signal` -- and only the retries were outstanding. A
+third container restart killed the chunked resume two tests in, and the
+expected yield did not justify a fourth attempt: across the 16 tests that did
+receive three attempts each, no retry produced a finding, and `cattrs` is 15
+more tests of the same shape. The question it would answer is already answered
+by the rest of the corpus.
+
+**Practical note for future runs.** Three container restarts killed long runs,
+twice at roughly the two-hour mark. A corpus pass should be driven per project,
+in chunks, with results written as it goes: the per-project files are what made
+this table recoverable at all, and the chunked resume limited the third loss to
+two tests rather than fifteen.
+
+**And check for the process, not the marker.** Progress was twice reported as
+"still running" on the strength of a log file that lacked its completion
+marker. A dead run looks exactly like a slow one by that test; only `pgrep` or
+the container's uptime distinguishes them.

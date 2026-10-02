@@ -980,3 +980,52 @@ reports realization sites and unsupported constructs from real third-party runs,
 so cross-referencing the two says which of those gaps actually bite under
 Hypothesis on real code. This costs a corpus pass we already know how to run,
 and it ranks the existing list instead of lengthening it.
+
+## B27. The realization census: one of CrossHair's hundred known gaps is reached by real code
+
+B26 proposed ranking CrossHair's `KNOWN_FAILURES` by what third-party
+Hypothesis suites actually hit. This is that measurement: the solver arm and
+the telemetry tier only -- no clean room, and the baseline cut to the minimum
+the gate needs, because realization sites come from the CrossHair arm alone.
+154 tests across `packaging`, `attrs`, `bidict` and `cattrs`, at 8-12 examples
+each, chosen for breadth rather than depth. 83 of the 154 realized at least
+once. Sites are attributed to their innermost CrossHair frame.
+
+| realizing frame | iterations | tests | projects | catalogued? |
+| --- | ---: | ---: | ---: | --- |
+| `__format__` (opcode_intercept.py) | 1981 | 61 | 1 | **yes** -- `str.__format__` |
+| `_fullmatch` (relib.py) | 437 | 28 | 1 | no |
+| `draw_integer` (crosshair_provider.py) | 52 | 26 | 1 | no |
+| `__contains__` (simplestructs.py) | 25 | 7 | 1 | no |
+| `__getitem__` (simplestructs.py) | 22 | 5 | 2 | no |
+| `__ch_deep_realize__` (simplestructs.py) | 14 | 2 | 1 | no |
+| `draw_float` (crosshair_provider.py) | 2 | 1 | 1 | no |
+
+One unsupported construct appeared at all: `\s* POSSESSIVE_REPEAT`, 559
+iterations across 37 tests.
+
+**The headline is the ratio: 1 of 100.** `KNOWN_FAILURES` enumerates a hundred
+soundness gaps, and a corpus of real Hypothesis suites reached exactly one of
+them -- `str.__format__`, which then dominates everything else by a factor of
+four. The list is not wrong, but it is not ordered by anything a user would
+feel, and it is not where the next finding is.
+
+**Most of what real code hits is not catalogued at all.** Six of the seven
+frames match no entry, because `inputgen.catalog` enumerates Python's own
+operations and these are CrossHair's internals: the regex engine (`relib`) and
+the symbolic containers (`simplestructs`). That is B26's fourth gap showing up
+in measurement rather than in argument.
+
+**Two entries are attribution artifacts, not defects.** `draw_integer` and
+`draw_float` are this plugin's own draw path, where Hypothesis asks for a value
+and the provider realizes one. They rank high on test count because every test
+goes through them. They are listed because the census should report what it
+measured, not a filtered version of it.
+
+**The corpus is narrow, and the table says so.** `packaging` drives all but one
+row; `__getitem__` is the only frame seen in two projects, and `bidict` and
+`cattrs` produced no realization sites at all. The census measures what these
+four libraries reach, not what Python code reaches. Widening it is cheap --
+this pass needed no clean room and no validation interpreter, which is roughly
+a quarter of a full three-way run -- and that is the argument for running the
+CrossHair-defect channel at breadth rather than depth.

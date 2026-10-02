@@ -10,12 +10,12 @@ import uuid
 from dataclasses import replace
 from typing import Dict, List, Optional
 
-from . import telemetry
-from .model import RunResult, SearchProgress, Verdict
+from . import provenance, telemetry
+from .model import Classification, RunResult, SearchProgress, Verdict
 from .pipeline import Pipeline, PipelineConfig, PipelineReport
 from .runner import EnvSpec, Runner
 from .sandbox import DockerSandbox, Limits, LocalSandbox, Sandbox, docker_available
-from .store import Store
+from .store import Store, cache_key, classification_from_payload
 
 _HEADLINE_ORDER = [
     Verdict.TROPHY_CANDIDATE,
@@ -212,7 +212,101 @@ def _merge_run(
     return into
 
 
-def _run_per_test(build, run_root: str, nodeids: List[str]) -> PipelineReport:
+class _Selection:
+    """Hands out a selection's tests once each, recording nothing."""
+
+    def __init__(self, nodeids: List[str]) -> None:
+        self._left = list(nodeids)
+        self.total = len(self._left)
+
+    def next(self) -> Optional[str]:
+        return self._left.pop(0) if self._left else None
+
+    def completed(self) -> List[Classification]:
+        return []
+
+    def reuse(self, nodeid: str) -> Optional[Classification]:
+        return None
+
+    def record(self, nodeid: str, items: List[Classification]) -> None:
+        pass
+
+
+class _Journal:
+    """Hands out a selection's tests from the store, recording each verdict.
+
+    Work is claimed before it runs and retired after, so a run killed partway
+    through resumes at the test it was on rather than at the beginning, and a
+    test that reliably destroys its worker is abandoned instead of retried
+    forever.
+    """
+
+    def __init__(
+        self,
+        store: Store,
+        run_id: str,
+        project: str,
+        commit: str,
+        versions: Dict[str, str],
+        refresh: bool = False,
+    ) -> None:
+        self.store = store
+        self.run_id = run_id
+        self.project = project
+        self.commit = commit
+        self.versions = versions
+        self.refresh = refresh
+        self.total = 0
+
+    def key(self, nodeid: str) -> str:
+        return cache_key(
+            commit_sha=self.commit,
+            nodeid=nodeid,
+            crosshair_version=self.versions.get("crosshair", provenance.UNKNOWN),
+            plugin_version=self.versions.get("plugin", provenance.UNKNOWN),
+            python_version=self.versions.get("python", provenance.UNKNOWN),
+        )
+
+    def prepare(self, nodeids: List[str]) -> None:
+        self.total = len(nodeids)
+        self.store.enqueue(
+            self.run_id, self.project, [(self.key(n), n) for n in nodeids]
+        )
+
+    def next(self) -> Optional[str]:
+        item = self.store.claim(self.run_id, time.time(), lease_seconds=0.0)
+        return item["nodeid"] if item else None
+
+    def completed(self) -> List[Classification]:
+        """Verdicts this run already holds, from the process that recorded them."""
+        return [
+            classification_from_payload(payload)
+            for payload in self.store.verdicts(self.run_id)
+        ]
+
+    def reuse(self, nodeid: str) -> Optional[Classification]:
+        if self.refresh:
+            return None
+        payload = self.store.cached(self.key(nodeid))
+        if payload is None:
+            return None
+        found = classification_from_payload(payload)
+        self.store.complete(self.key(nodeid), self.run_id, found)
+        return found
+
+    def record(self, nodeid: str, items: List[Classification]) -> None:
+        for item in items:
+            if item.nodeid == nodeid:
+                self.store.complete(self.key(nodeid), self.run_id, item)
+                return
+        self.store.abandon(
+            self.run_id, self.key(nodeid), "the run produced no verdict for it"
+        )
+
+
+def _run_per_test(
+    build, run_root: str, nodeids: List[str], journal=None
+) -> PipelineReport:
     """Run each test in its own invocation and merge the reports.
 
     The budgets in ``PipelineConfig`` apply to one pytest invocation, so a
@@ -220,10 +314,37 @@ def _run_per_test(build, run_root: str, nodeids: List[str]) -> PipelineReport:
     ``max_examples``. Past a handful of tests that guarantees the solver arm is
     killed mid-run, which the classifier can only report as a timeout for every
     test in the batch.
+
+    With a ``journal``, the order and the stopping point come from the store,
+    and a test whose verdict is already cached is reported without running.
     """
+    if journal is None:
+        journal = _Selection(nodeids)
+    else:
+        journal.prepare(nodeids)
     merged = PipelineReport(project_dir="")
-    for index, nodeid in enumerate(nodeids):
-        slot = os.path.join(run_root, f"t{index:03d}")
+    for known in journal.completed():
+        merged.collected.append(known.nodeid)
+        merged.eligible.append(known.nodeid)
+        merged.classifications.append(known)
+    index = len(merged.classifications)
+    while True:
+        nodeid = journal.next()
+        if nodeid is None:
+            break
+        index += 1
+        known = journal.reuse(nodeid)
+        if known is not None:
+            merged.collected.append(nodeid)
+            merged.eligible.append(nodeid)
+            merged.classifications.append(known)
+            print(
+                f"  [{index}/{journal.total}] {nodeid} -> "
+                f"{known.verdict.value} (cached)",
+                flush=True,
+            )
+            continue
+        slot = os.path.join(run_root, f"t{index - 1:03d}")
         one = build(slot).run([nodeid])
         merged.project_dir = one.project_dir
         merged.collected.extend(one.collected)
@@ -235,8 +356,9 @@ def _run_per_test(build, run_root: str, nodeids: List[str]) -> PipelineReport:
         merged.duration += one.duration
         merged.crosshair_run = _merge_run(merged.crosshair_run, one.crosshair_run)
         merged.telemetry_run = _merge_run(merged.telemetry_run, one.telemetry_run)
+        journal.record(nodeid, one.classifications)
         print(
-            f"  [{index + 1}/{len(nodeids)}] {nodeid} -> "
+            f"  [{index}/{journal.total}] {nodeid} -> "
             + ", ".join(sorted({c.verdict.value for c in one.classifications})),
             flush=True,
         )
@@ -351,12 +473,33 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument(
         "--store", default=None, help="sqlite path for durable verdicts"
     )
+    parser.add_argument(
+        "--resume",
+        default=None,
+        metavar="RUN_ID",
+        help=(
+            "continue the run with this id instead of starting one, skipping "
+            "the tests it already has verdicts for. Requires --store and "
+            "--per-test."
+        ),
+    )
+    parser.add_argument(
+        "--refresh",
+        action="store_true",
+        help=(
+            "run every test even where a verdict is already cached for this "
+            "commit and these versions."
+        ),
+    )
     parser.add_argument("--json", action="store_true", help="emit JSON instead of text")
     parser.add_argument("nodeids", nargs="*", help="restrict to these node ids")
     args = parser.parse_args(argv)
 
+    if args.resume and not (args.store and args.per_test):
+        parser.error("--resume needs --store and --per-test")
+
     project = os.path.abspath(args.project)
-    run_id = uuid.uuid4().hex[:12]
+    run_id = args.resume or uuid.uuid4().hex[:12]
     run_root = os.path.abspath(
         args.run_root or os.path.join(project, ".discovery", run_id)
     )
@@ -395,20 +538,37 @@ def main(argv: Optional[List[str]] = None) -> int:
             config=config,
         )
 
-    if args.per_test:
-        targets = list(args.nodeids) or build(run_root).runner.collect(
-            crosshair_env, extra_args=config.pytest_args
+    store = Store(args.store) if args.store else None
+    commit = provenance.project_commit(project)
+    versions = provenance.environment_versions(crosshair_env.python_argv)
+    if store is not None:
+        store.record_run(
+            run_id, project, commit, time.time(), {**versions, "run_root": run_root}
         )
-        report = _run_per_test(build, run_root, targets)
-    else:
-        report = build(run_root).run(args.nodeids or None)
-    if args.retry_no_signal > 0:
-        _retry_no_signal(build, run_root, report, args.retry_no_signal)
 
-    if args.store:
-        with Store(args.store) as store:
-            store.record_run(run_id, project, "", time.time(), {"run_root": run_root})
+    try:
+        if args.per_test:
+            targets = list(args.nodeids) or build(run_root).runner.collect(
+                crosshair_env, extra_args=config.pytest_args
+            )
+            journal = (
+                _Journal(store, run_id, project, commit, versions, args.refresh)
+                if store is not None
+                else None
+            )
+            report = _run_per_test(build, run_root, targets, journal)
+        else:
+            report = build(run_root).run(args.nodeids or None)
+        if args.retry_no_signal > 0:
+            _retry_no_signal(build, run_root, report, args.retry_no_signal)
+        if store is not None:
             store.record_verdicts(run_id, report.classifications)
+            print(
+                f"run {run_id}: {store.progress(run_id)}", file=sys.stderr, flush=True
+            )
+    finally:
+        if store is not None:
+            store.close()
 
     if args.json:
         print(

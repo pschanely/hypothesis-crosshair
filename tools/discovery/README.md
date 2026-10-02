@@ -29,6 +29,23 @@ findings are reported as `pending_validation` rather than claimed.
 the pipeline against code you already trust; never point it at a repository you
 have not read.
 
+### Resuming, and the verdict cache
+
+With `--store` and `--per-test`, each test is claimed from the store before it
+runs and retired after, and its verdict is cached under the project commit plus
+the CrossHair, plugin and Python versions. Two things follow:
+
+- `--resume RUN_ID` continues a run that was killed, skipping the tests it
+  already has verdicts for and reporting them alongside the new ones. The run
+  id is printed when the run finishes.
+- A later run over the same commit and versions is served from the cache
+  instead of being executed. A CrossHair or plugin upgrade changes every key,
+  so the first run after a release re-executes everything and is the regression
+  suite. `--refresh` forces re-execution without one.
+
+A test claimed three times without ever producing a verdict is abandoned, so a
+test that reliably destroys its worker cannot stop a run from finishing.
+
 ## What it reports
 
 | Verdict | Meaning |
@@ -97,7 +114,8 @@ defect.
 | `classify.py` | Baseline gate and the three-way differential |
 | `validate.py` | Clean-room replay of a reported example |
 | `pipeline.py` | Stage orchestration |
-| `store.py` | SQLite durable state and the version-keyed verdict cache |
+| `store.py` | SQLite durable state: work queue, verdicts, version-keyed cache |
+| `provenance.py` | The commit and versions a cached verdict belongs to |
 
 ## Tests
 

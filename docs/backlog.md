@@ -921,3 +921,62 @@ two tests rather than fifteen.
 "still running" on the strength of a log file that lacked its completion
 marker. A dead run looks exactly like a slow one by that test; only `pgrep` or
 the container's uptime distinguishes them.
+
+## B26. CrossHair already has the differential and the census; what is left, and what it must cost
+
+Two of the three things proposed for finding CrossHair bugs directly already
+exist upstream, in better form.
+
+**The symbolic-vs-concrete differential is `crosshair/fuzz_core_test.py`.** It
+enumerates the whole `crosshair.inputgen.catalog` surface, drives each operation
+once per call shape, and compares return value, exception type and in-place
+mutation via `behavior_compare.run_differential`. It filters nondeterministic
+operations (two concrete runs must agree) and identity-eq outputs, and carries
+roughly a hundred `KNOWN_FAILURES` grouped by root cause.
+
+**The reachability census is `crosshair/tools/measure_support.py`.** It runs an
+operation forward to a concrete output, then asks CrossHair to invert it
+(`post: _ != output`) while sweeping input size to find the cliff. Its "black"
+cell -- CrossHair falsely confirming that no input yields a known-reachable
+output -- is exactly the soundness shape of CrossHair issue #448.
+
+Four things that machinery structurally cannot see, each visible in its own code:
+
+- **Results are realized before they are compared.** `summarize_execution` calls
+  `deep_realize` on the return value and `flexible_equal` compares concrete
+  values, so a defect in the *symbolic result's own model* is erased before the
+  comparison. Issue #516 is this shape: the realized tuple is a fine tuple; the
+  bug is that the unrealized result compares equal to a list.
+- **Every argument is pinned.** `run_symbolic_pinned` calls `pin_to` on each
+  proxy before running, so the solver never branches on an unconstrained value.
+  Pinned-path soundness and search soundness are different properties, and only
+  the second is what runs under Hypothesis.
+- **One expression, one call.** No composition and no sequences. Issue #453
+  (mutate a symbolic `array.array`, then compare it) is two steps; it appears in
+  `KNOWN_FAILURES` only because `array.extend` happens to diverge alone.
+- **The catalog is Python's own surface.** No user-defined classes, so no
+  `__eq__`/`__hash__` pairs, dataclasses, inheritance, descriptors, generators,
+  or a symbolic stored in a user object's field.
+
+Three extensions follow, all built on `CallSpec` and `run_differential` rather
+than beside them: a **composition differential** that chains several catalogued
+operations and keeps intermediates symbolic, comparing only at the end; a
+**sequence differential** over one symbolic receiver, which catches #453 as a
+class rather than per-method; and a **user-defined type surface**, which is the
+one place a third-party corpus has an edge the catalog cannot reach.
+
+**The governing constraint is cost, not coverage.** CrossHair's suite already
+trades breadth for run time deliberately -- `INPUTS_PER_OP = 3`, `PIN_ITERS =
+12`, "deliberately NOT a wide fuzz" -- and a composition or sequence
+differential multiplies the surface rather than adding to it. None of these may
+land as a broad CI gate. The shape to copy is `measure_support`: an out-of-band
+sweep run on demand, emitting a ranked artifact, with only a small pinned
+regression set in CI for divergences the sweep has already found. Any proposal
+here needs a measured cost-per-finding before it is worth proposing.
+
+**One cheap prioritization signal is available now.** `KNOWN_FAILURES` is a flat
+list; many entries are "should realize first". The provider's telemetry already
+reports realization sites and unsupported constructs from real third-party runs,
+so cross-referencing the two says which of those gaps actually bite under
+Hypothesis on real code. This costs a corpus pass we already know how to run,
+and it ranks the existing list instead of lengthening it.

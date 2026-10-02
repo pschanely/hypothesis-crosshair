@@ -18,10 +18,10 @@ INVENTORY = [
 
 
 class FakeRunner:
-    def __init__(self):
+    def __init__(self, run_root):
         self.sandbox = object()
         self.project_dir = "/proj"
-        self.run_root = "/run"
+        self.run_root = str(run_root)
         self.collect_calls = []
         self.run_specs = []
 
@@ -56,8 +56,8 @@ class FakeValidator:
         return {}
 
 
-def build(clean=True, **cfg):
-    runner = FakeRunner()
+def build(run_root, clean=True, **cfg):
+    runner = FakeRunner(run_root)
     pipeline = Pipeline(
         runner,
         crosshair_env=EnvSpec("ch", ["python"], has_crosshair=True),
@@ -68,39 +68,39 @@ def build(clean=True, **cfg):
     return pipeline, runner
 
 
-def test_the_clean_room_is_checked_before_anything_runs():
-    pipeline, runner = build()
+def test_the_clean_room_is_checked_before_anything_runs(tmp_path):
+    pipeline, runner = build(tmp_path)
     pipeline.run()
     assert pipeline.validator.preflight_calls == 1
 
 
-def test_a_dirty_clean_room_aborts_the_run():
-    pipeline, runner = build(clean=False)
+def test_a_dirty_clean_room_aborts_the_run(tmp_path):
+    pipeline, runner = build(tmp_path, clean=False)
     with pytest.raises(RuntimeError, match="not a clean room"):
         pipeline.run()
     assert runner.run_specs == [], "no test should execute against a dirty clean room"
 
 
-def test_extra_pytest_args_reach_collection():
-    pipeline, runner = build(pytest_args=("-m", "property"))
+def test_extra_pytest_args_reach_collection(tmp_path):
+    pipeline, runner = build(tmp_path, pytest_args=("-m", "property"))
     pipeline.run()
     assert runner.collect_calls == [("-m", "property")]
 
 
-def test_a_file_selector_is_expanded_against_the_inventory():
-    pipeline, _ = build()
+def test_a_file_selector_is_expanded_against_the_inventory(tmp_path):
+    pipeline, _ = build(tmp_path)
     report = pipeline.run(["tests/t_test.py"])
     assert report.collected == INVENTORY[:2]
 
 
-def test_no_selector_runs_the_whole_inventory():
-    pipeline, _ = build()
+def test_no_selector_runs_the_whole_inventory(tmp_path):
+    pipeline, _ = build(tmp_path)
     assert pipeline.run().collected == INVENTORY
 
 
-def test_search_progress_reaches_the_classification():
+def test_search_progress_reaches_the_classification(tmp_path):
     """The oracle counters are useless if nothing carries them to the verdict."""
-    pipeline, _ = build()
+    pipeline, _ = build(tmp_path)
     report = pipeline.run()
     assert report.classifications
     for entry in report.classifications:

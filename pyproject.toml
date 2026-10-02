@@ -47,6 +47,9 @@ dev = [
     "isort==5.12.0"
 ]
 
+[tool.pytest.ini_options]
+testpaths = ["hypothesis_crosshair_provider"]
+
 [tool.isort]
 profile = "black"
 skip_gitignore = true

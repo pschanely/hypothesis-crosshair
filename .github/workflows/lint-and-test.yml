@@ -27,3 +27,6 @@ jobs:
         run: uv run isort --check-only .
       - name: Run pytest
         run: uv run pytest
+      - name: Run pytest (discovery tool)
+        run: uv run pytest
+        working-directory: tools/discovery

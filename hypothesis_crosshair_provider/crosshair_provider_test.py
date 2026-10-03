@@ -1,3 +1,4 @@
+import math
 from unittest.mock import patch
 
 import pytest
@@ -13,7 +14,10 @@ from hypothesis.errors import BackendCannotProceed
 from hypothesis.internal.conjecture.provider_conformance import run_conformance_test
 from hypothesis.internal.intervalsets import IntervalSet
 
-from hypothesis_crosshair_provider.crosshair_provider import CrossHairPrimitiveProvider
+from hypothesis_crosshair_provider.crosshair_provider import (
+    CrossHairPrimitiveProvider,
+    summarize_debug_log,
+)
 
 
 class TargetException(Exception):
@@ -249,3 +253,138 @@ def test_unsat_during_user_exception_realization(solver_is_sat_mock):
             s_int = provider.draw_integer()
             raise TargetException
     assert solver_is_sat_mock.call_count == 1
+
+
+def test_summarize_debug_log_reports_an_unsupported_construct():
+    """The construct is logged after the pattern, not beside the marker."""
+    text = (
+        "1.000|   |_fullmatch() Unsupported symbolic regex \\s*\n"
+        "    (?P<release>[0-9]+)\n"
+        "    (?:[._-][a-z0-9]+)*+\n"
+        "\\s* POSSESSIVE_REPEAT"
+    )
+    assert summarize_debug_log(text) == [
+        "Unsupported symbolic regex: \\s* POSSESSIVE_REPEAT"
+    ]
+
+
+def test_summarize_debug_log_names_the_code_that_forced_realization():
+    text = (
+        "1.000|  |find_model_value() Realized at (t mine.py:9) "
+        "(__init__ version.py:418) (__ch_realize__ builtinslib.py:1472) "
+        "(find_model_value statespace.py:1117)"
+    )
+    assert summarize_debug_log(text) == [
+        "Realized at (t mine.py:9) (__init__ version.py:418)"
+    ]
+
+
+def test_summarize_debug_log_drops_a_stack_of_only_plumbing():
+    text = (
+        "1.000|  |find_model_value() Realized at "
+        "(__ch_realize__ builtinslib.py:1472) (find_model_value statespace.py:1117)"
+    )
+    assert summarize_debug_log(text) == []
+
+
+def test_summarize_debug_log_keeps_solver_messages():
+    text = (
+        "1.000|  |f() SMT realized symbolic: str_01len == 0\n"
+        "2.000|  |g() SMT chose: Not(str_01len > 0) (chance: 0.75)"
+    )
+    assert summarize_debug_log(text) == [
+        "SMT realized symbolic: str_01len == 0",
+        "SMT chose: Not(str_01len > 0) (chance: 0.75)",
+    ]
+
+
+def test_summarize_debug_log_discards_the_bulk_of_the_buffer():
+    """Most of the buffer is constraint dumps; reporting it all is untenable."""
+    noise = "\n".join(f"{i}.000|  |h() Iteration {i}" for i in range(200))
+    assert summarize_debug_log(noise) == []
+
+
+def test_a_replayed_value_outside_the_requested_bounds_discards_the_case():
+    """A desynchronized replay hands a draw a value meant for another draw.
+
+    The value usually has the right type, so only the draw's own bounds can
+    tell. Returning it puts an impossible value into the test, where it
+    surfaces as an error inside whatever code used it.
+    """
+    provider = CrossHairPrimitiveProvider()
+    provider.doublecheck_inputs = [9999]
+    with pytest.raises(BackendCannotProceed):
+        provider.draw_integer(0, 30, shrink_towards=24)
+
+
+def test_a_replayed_value_within_the_requested_bounds_is_used():
+    provider = CrossHairPrimitiveProvider()
+    provider.doublecheck_inputs = [7]
+    assert provider.draw_integer(0, 30) == 7
+
+
+def test_an_unbounded_integer_draw_accepts_any_replayed_integer():
+    provider = CrossHairPrimitiveProvider()
+    provider.doublecheck_inputs = [9999]
+    assert provider.draw_integer() == 9999
+
+
+def test_a_replayed_string_outside_its_alphabet_discards_the_case():
+    provider = CrossHairPrimitiveProvider()
+    provider.doublecheck_inputs = ["zzz"]
+    with pytest.raises(BackendCannotProceed):
+        provider.draw_string(IntervalSet(((97, 99),)), min_size=0, max_size=5)
+
+
+def test_a_replayed_string_of_the_wrong_length_discards_the_case():
+    provider = CrossHairPrimitiveProvider()
+    provider.doublecheck_inputs = ["abc"]
+    with pytest.raises(BackendCannotProceed):
+        provider.draw_string(IntervalSet(((97, 99),)), min_size=5)
+
+
+def test_a_replayed_string_that_answers_the_request_is_used():
+    provider = CrossHairPrimitiveProvider()
+    provider.doublecheck_inputs = ["abc"]
+    assert provider.draw_string(IntervalSet(((97, 99),)), min_size=1) == "abc"
+
+
+def test_a_replayed_bytes_of_the_wrong_length_discards_the_case():
+    provider = CrossHairPrimitiveProvider()
+    provider.doublecheck_inputs = [b"abcdef"]
+    with pytest.raises(BackendCannotProceed):
+        provider.draw_bytes(min_size=0, max_size=2)
+
+
+def test_a_replayed_nan_is_refused_when_the_draw_forbids_it():
+    provider = CrossHairPrimitiveProvider()
+    provider.doublecheck_inputs = [float("nan")]
+    with pytest.raises(BackendCannotProceed):
+        provider.draw_float(allow_nan=False)
+
+
+def test_a_replayed_nan_is_used_when_the_draw_allows_it():
+    provider = CrossHairPrimitiveProvider()
+    provider.doublecheck_inputs = [float("nan")]
+    assert math.isnan(provider.draw_float(allow_nan=True))
+
+
+def test_a_replayed_float_outside_the_requested_range_discards_the_case():
+    provider = CrossHairPrimitiveProvider()
+    provider.doublecheck_inputs = [500.0]
+    with pytest.raises(BackendCannotProceed):
+        provider.draw_float(min_value=0.0, max_value=1.0)
+
+
+def test_a_replayed_float_below_the_smallest_magnitude_discards_the_case():
+    provider = CrossHairPrimitiveProvider()
+    provider.doublecheck_inputs = [1e-30]
+    with pytest.raises(BackendCannotProceed):
+        provider.draw_float(smallest_nonzero_magnitude=1e-10)
+
+
+def test_zero_is_allowed_below_the_smallest_nonzero_magnitude():
+    """The bound is on nonzero magnitudes, so zero itself still answers."""
+    provider = CrossHairPrimitiveProvider()
+    provider.doublecheck_inputs = [0.0]
+    assert provider.draw_float(smallest_nonzero_magnitude=1e-10) == 0.0

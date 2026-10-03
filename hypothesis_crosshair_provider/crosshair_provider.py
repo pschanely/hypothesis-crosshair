@@ -6,7 +6,18 @@ from collections import defaultdict
 from contextlib import ExitStack, contextmanager
 from io import StringIO
 from time import process_time
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Type, TypeVar, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+    Type,
+    TypeVar,
+    Union,
+)
 
 import crosshair.core_and_libs  # Needed for patch registrations
 from crosshair import debug, deep_realize
@@ -48,11 +59,102 @@ from hypothesis.internal.observability import observability_enabled
 
 _T = TypeVar("_T")
 
-_IMPORTANT_LOG_RE = re.compile(".*((?:SMT realized symbolic.*)|(?:SMT chose.*))$")
+_IMPORTANT_LOG_RE = re.compile(
+    ".*((?:SMT realized symbolic.*)|(?:SMT chose.*)|(?:Realized at.*))$"
+)
+
+#: Debug records worth reporting whole rather than line by line.
+#:
+#: A record's interesting part is not always on its first line. CrossHair logs
+#: an unsupported regex as the marker, then the pattern, then the construct it
+#: could not handle, so a VERBOSE pattern puts the construct forty lines below
+#: the marker.
+_MULTILINE_LOG_MARKERS = ("Unsupported symbolic regex",)
+
+_LOG_RECORD_START_RE = re.compile(r"^[\d.]+\|")
+
+_FRAME_RE = re.compile(r"\([^()]+ ([^()]+):\d+\)")
+
+#: Modules that realize a value on behalf of a caller rather than causing it.
+#:
+#: The innermost frames of a realization stack are always these, so reporting
+#: them names the mechanism instead of the code that triggered it.
+_PLUMBING_MODULES = frozenset(
+    {"statespace.py", "builtinslib.py", "core.py", "copyext.py", "copy.py"}
+)
+
+_MESSAGE_LIMIT = 240
+
+
+def _log_body(line: str) -> str:
+    line = _LOG_RECORD_START_RE.sub("", line)
+    line = re.sub(r"^[ |]*", "", line)
+    return re.sub(r"^\w+\(\) ", "", line)
+
+
+def _summarize_log_record(record: List[str]) -> Optional[str]:
+    """Compact one debug record into a single reportable message."""
+    body = _log_body(record[0])
+    for marker in _MULTILINE_LOG_MARKERS:
+        if body.startswith(marker):
+            tail = next((line.strip() for line in reversed(record) if line.strip()), "")
+            return f"{marker}: {tail[-_MESSAGE_LIMIT:]}"
+    match = _IMPORTANT_LOG_RE.match(record[0])
+    if not match:
+        return None
+    message = match.group(1)
+    if message.startswith("Realized at"):
+        frames = [
+            match.group(0)
+            for match in _FRAME_RE.finditer(message)
+            if os.path.basename(match.group(1)) not in _PLUMBING_MODULES
+        ]
+        if not frames:
+            return None
+        return "Realized at " + " ".join(frames[-2:])
+    return message[:_MESSAGE_LIMIT]
+
+
+def summarize_debug_log(text: str) -> List[str]:
+    """Reportable messages from a debug buffer.
+
+    Only a small share of the buffer is reportable: the raw log runs to roughly
+    9KB per iteration, nearly all of it SMT constraint dumps and realization
+    stacks.
+    """
+    records: List[List[str]] = []
+    for line in text.split("\n"):
+        if _LOG_RECORD_START_RE.match(line) or not records:
+            records.append([line])
+        else:
+            records[-1].append(line)
+    summaries = (_summarize_log_record(record) for record in records)
+    return [message for message in summaries if message]
 
 
 def is_negative(x):
     return math.copysign(1, x) == -1
+
+
+def _float_answers(
+    value: float,
+    min_value: float,
+    max_value: float,
+    allow_nan: bool,
+    smallest_nonzero_magnitude: Optional[float],
+) -> bool:
+    """Whether a concrete float could have come from this draw's request."""
+    if math.isnan(value):
+        return allow_nan
+    if value < min_value or value > max_value:
+        return False
+    if min_value == 0.0 and not is_negative(min_value) and is_negative(value):
+        return False
+    if max_value == 0.0 and is_negative(max_value) and not is_negative(value):
+        return False
+    if smallest_nonzero_magnitude and 0 < abs(value) < smallest_nonzero_magnitude:
+        return False
+    return True
 
 
 class SpanTracker:
@@ -132,7 +234,18 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
         )
         return space
 
-    def _replayed_draw(self, expected_type: Type[_T]) -> _T:
+    def _replayed_draw(
+        self,
+        expected_type: Type[_T],
+        satisfies_request: Optional[Callable[[Any], bool]] = None,
+    ) -> _T:
+        """Pop the next value the first run produced, if it answers this draw.
+
+        A replay desynchronizes when realization changes which branches a
+        strategy takes, and the value then belongs to a different draw. Such a
+        value often has the right type, so the draw's own constraints decide
+        whether it can be the answer.
+        """
         if not self.doublecheck_inputs:
             if self.doublecheck_inputs is None:
                 raise CrossHairInternal
@@ -144,16 +257,25 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
             )
             raise BackendCannotProceed("discard_test_case")
         value = self.doublecheck_inputs.pop()
-        if isinstance(value, expected_type):
-            return value
-        debug(
-            "Inconsistent behavior on concrete replay:",
-            type(value),
-            "found from first run, but",
-            expected_type,
-            "was requested.",
-        )
-        raise BackendCannotProceed("discard_test_case")
+        if not isinstance(value, expected_type):
+            debug(
+                "Inconsistent behavior on concrete replay:",
+                type(value),
+                "found from first run, but",
+                expected_type,
+                "was requested.",
+            )
+            raise BackendCannotProceed("discard_test_case")
+        if satisfies_request is not None and not satisfies_request(value):
+            debug(
+                "Inconsistent behavior on concrete replay:",
+                repr(value),
+                "found from first run, but it is outside the bounds this draw",
+                "asked for; the replayed values are no longer aligned with the",
+                "draws requesting them.",
+            )
+            raise BackendCannotProceed("discard_test_case")
+        return value
 
     def bubble_status(self):
         if self._previous_space is not None:
@@ -378,7 +500,11 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                         symbolic, 0, probability=span_depth / (span_depth + 2)
                     )
             else:
-                return self._replayed_draw(int)
+                return self._replayed_draw(
+                    int,
+                    lambda value: (min_value is None or min_value <= value)
+                    and (max_value is None or value <= max_value),
+                )
         conditions = []
         if min_value is not None:
             conditions.append(min_value <= symbolic)
@@ -417,7 +543,16 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                 )
                 self._apply_next_hint(symbolic)
             else:
-                return self._replayed_draw(float)
+                return self._replayed_draw(
+                    float,
+                    lambda value: _float_answers(
+                        value,
+                        min_value,
+                        max_value,
+                        allow_nan,
+                        smallest_nonzero_magnitude,
+                    ),
+                )
         if math.isnan(symbolic):
             if not allow_nan:
                 raise IgnoreAttempt
@@ -473,7 +608,12 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                 else:
                     symbolic = ""  # (no valid characters)
             else:
-                return self._replayed_draw(str)
+                return self._replayed_draw(
+                    str,
+                    lambda value: min_size <= len(value)
+                    and (max_size is None or len(value) <= max_size)
+                    and all(ord(char) in intervals for char in value),
+                )
         conditions = []
         if min_size > 0:
             conditions.append(len(symbolic) >= min_size)
@@ -503,7 +643,9 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                 )
                 self._apply_next_hint(symbolic)
             else:
-                return self._replayed_draw(bytes)
+                return self._replayed_draw(
+                    bytes, lambda value: min_size <= len(value) <= max_size
+                )
         mylen = len(symbolic)
         all_conditions = all([min_size <= mylen, mylen <= max_size])
         with NoTracing():
@@ -587,13 +729,9 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
         and will be included as `observation["metadata"]["backend"]`.
         """
         if getattr(self, "debug_buffer", None):
-            lines = self.debug_buffer.getvalue().split("\n")
-            messages = [
-                match.group(1) for match in map(_IMPORTANT_LOG_RE.match, lines) if match
-            ]
             return {
                 "completion": self.completion,
-                "messages": messages,
+                "messages": summarize_debug_log(self.debug_buffer.getvalue()),
             }
         return {}
 

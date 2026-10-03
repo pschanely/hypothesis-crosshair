@@ -163,3 +163,51 @@ def test_metadata_is_read_from_the_cache_without_a_request(tmp_path):
     name = "hypothesis-crosshair-no-such-package-9f3a"
     (tmp_path / f"{name}.json").write_text(json.dumps(payload(name=name)))
     assert metadata(name, str(tmp_path))["info"]["name"] == name
+
+
+def test_one_repository_yields_one_checkout():
+    """11 of the top 300 packages are published from one monorepo."""
+    shared = [
+        PackageFacts(
+            name=f"p{i}",
+            repo_url="https://github.com/googleapis/google-cloud-python",
+            downloads=100 - i,
+            wheel_tags={"any"},
+        )
+        for i in range(4)
+    ]
+    other = PackageFacts(
+        name="other", repo_url="https://github.com/a/other", wheel_tags={"any"}
+    )
+    kept = shortlist(shared + [other])
+    assert len(kept) == 2
+    assert {f.repo_url for f in kept} == {
+        "https://github.com/googleapis/google-cloud-python",
+        "https://github.com/a/other",
+    }
+
+
+def test_the_best_scoring_package_represents_its_repository():
+    quiet = PackageFacts(
+        name="quiet", repo_url="https://github.com/a/b", downloads=1, wheel_tags={"any"}
+    )
+    busy = PackageFacts(
+        name="busy",
+        repo_url="https://github.com/a/b",
+        downloads=10**9,
+        wheel_tags={"any"},
+    )
+    assert [f.name for f in shortlist([quiet, busy])] == ["busy"]
+
+
+def test_the_budget_counts_repositories_not_packages():
+    shared = [
+        PackageFacts(
+            name=f"p{i}", repo_url="https://github.com/a/mono", wheel_tags={"any"}
+        )
+        for i in range(5)
+    ]
+    other = PackageFacts(
+        name="o", repo_url="https://github.com/a/o", wheel_tags={"any"}
+    )
+    assert len(shortlist(shared + [other], budget=2)) == 2

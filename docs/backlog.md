@@ -1478,3 +1478,65 @@ This is worth stating plainly: until this was fixed, any suite's result could
 have been scored against the wrong source, in either direction. All nine were
 re-run from scratch afterwards and all report every mutation caught, which is
 the first time that claim has been trustworthy.
+
+---
+
+## B37. Candidate discovery: clone, do not guess
+
+B33 named candidate discovery the bottleneck, and the fix turns out not to
+need an agent at all.
+
+**PyPI metadata cannot answer the question.** Hypothesis is a development
+dependency, and only runtime dependencies are published, so no amount of
+metadata says whether a project has property tests. The design doc anticipated
+this and proposed GitHub code search; a shallow clone plus `candidates.survey`
+answers it exactly in about a second, which is cheaper than reasoning about it
+and is not a guess. So the prefilter only ranks, and the probe decides.
+
+The source is `hugovk/top-pypi-packages`, which is the public PyPI download
+ranking -- built now from ClickHouse's PyPI tables rather than BigQuery, same
+lineage. 15,000 names, no credentials. Per-package metadata comes from the
+PyPI JSON API, cached on disk.
+
+**The one metadata signal that measures something real is the wheel tag.** A
+package publishing only `-any.whl` has no C extension for CrossHair to realize
+at; `numpy` ships `manylinux` and `macosx` wheels and `cattrs` ships `any`.
+That is the design's "exclude numpy/pandas/torch-centric code" rule measured
+directly rather than guessed from imports. A package with no wheel at all is
+unknown rather than compiled, and scores between the two.
+
+**The prefilter score saturates and is not claimed to rank.** Across the top
+300 packages, most are pure Python with no array dependency and large download
+counts, so most score 100. That is honest about what it is: a way to drop the
+unfit, not a way to order the fit. The survey does the ordering.
+
+**Measured, over the 30 most downloaded clonable packages:** 6 carry
+Hypothesis property tests, found in 54 seconds of cloning. The hit rate, 20%,
+is lower than B33's hand-picked 6 of 15, but it costs 1.8 seconds per
+candidate rather than a judgment call. `idna` (17 property tests, pure
+Unicode and string logic) and `pydantic` (9) are candidates the corpus did not
+have.
+
+**Two bugs found by running it wide, both about cost rather than correctness.**
+
+A depth-1 clone of `google-cloud-python` is 1.4GB. `--filter=blob:limit=1m`
+does not help, because the size is not large blobs: it is a monorepo with an
+enormous tree of small generated files. A checkout now has a megabyte budget,
+and one over it is deleted unread and reported as needing a bigger budget
+rather than as having no tests.
+
+Worse, 11 of the top 300 packages are published from that one repository, and
+7 more from `opentelemetry-python`. Probing per package rather than per
+repository would have cloned it 11 times -- about 15GB to read the same tree
+over and over. The shortlist now yields one checkout per repository, keeping
+the best-scoring package as its representative. Across 289 clonable packages
+that is 266 repositories, so 23 clones were pure waste.
+
+**A checkout is third-party source no gate has passed.** It is cloned at depth
+1, read, and deleted. Nothing in it is imported, installed or run, which is
+what makes it safe to do this to hundreds of unknown projects.
+
+Open: the prefilter cannot see repository size before cloning, so the budget
+is enforced after the download rather than before it. GitHub's API would say,
+but that means a call per candidate against repositories outside this
+project.

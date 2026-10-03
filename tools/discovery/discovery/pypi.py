@@ -187,14 +187,20 @@ def score(facts: PackageFacts) -> int:
 
 
 def shortlist(every: Sequence[PackageFacts], budget: int = 0) -> List[PackageFacts]:
-    """The packages worth cloning, best first, cut to what can be afforded.
+    """The repositories worth cloning, best first, cut to what can be afforded.
 
-    Only a package with nowhere to clone from is dropped. The budget is a
-    line through a ranking, not a judgment about what is below it.
+    Several packages published from one repository yield one checkout, since
+    surveying it twice reads the same tree twice. Only a package with nowhere
+    to clone from is dropped. The budget is a line through a ranking, not a
+    judgment about what is below it.
     """
     clonable = [facts for facts in every if facts.repo_url]
     clonable.sort(key=lambda facts: (-score(facts), -facts.downloads, facts.name))
-    return clonable[:budget] if budget else clonable
+    seen: Dict[str, PackageFacts] = {}
+    for facts in clonable:
+        seen.setdefault(facts.repo_url, facts)
+    unique = list(seen.values())
+    return unique[:budget] if budget else unique
 
 
 def _get(url: str, timeout: float) -> bytes:

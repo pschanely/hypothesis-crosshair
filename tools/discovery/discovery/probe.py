@@ -24,6 +24,11 @@ CLONE_DEPTH = 1
 
 CLONE_TIMEOUT = 300.0
 
+#: Megabytes a checkout may occupy before it is deleted unread. A monorepo
+#: publishing many packages can run to gigabytes of generated source, which
+#: exhausts a sandbox's disk allowance for one candidate.
+MAX_CHECKOUT_MB = 500
+
 
 @dataclass
 class ProbeResult:
@@ -33,6 +38,7 @@ class ProbeResult:
     assessment: Optional[Assessment] = None
     error: str = ""
     seconds: float = 0.0
+    megabytes: int = 0
 
     @property
     def worth_provisioning(self) -> bool:
@@ -48,6 +54,17 @@ class ProbeResult:
             f"{self.facts.name}: score {found.score}, {found.units} property "
             f"tests  {self.facts.repo_url}"
         )
+
+
+def checkout_megabytes(path: str) -> int:
+    total = 0
+    for root, _, names in os.walk(path):
+        for name in names:
+            try:
+                total += os.lstat(os.path.join(root, name)).st_size
+            except OSError:
+                continue
+    return total // (1024 * 1024)
 
 
 def clone(repo_url: str, dest: str, timeout: float = CLONE_TIMEOUT) -> None:
@@ -67,6 +84,7 @@ def probe(
     work_dir: str,
     keep: bool = False,
     timeout: float = CLONE_TIMEOUT,
+    max_megabytes: int = MAX_CHECKOUT_MB,
 ) -> ProbeResult:
     """Clone one candidate, survey it, and remove the checkout again."""
     dest = os.path.join(work_dir, facts.name)
@@ -81,12 +99,26 @@ def probe(
             error=str(exc) or type(exc).__name__,
             seconds=time.monotonic() - started,
         )
+    size = checkout_megabytes(dest)
+    if max_megabytes and size > max_megabytes:
+        shutil.rmtree(dest, ignore_errors=True)
+        return ProbeResult(
+            facts,
+            error=f"checkout is {size}MB, over the {max_megabytes}MB budget",
+            seconds=time.monotonic() - started,
+            megabytes=size,
+        )
     try:
         found = assess(survey(dest))
     finally:
         if not keep:
             shutil.rmtree(dest, ignore_errors=True)
-    return ProbeResult(facts, assessment=found, seconds=time.monotonic() - started)
+    return ProbeResult(
+        facts,
+        assessment=found,
+        seconds=time.monotonic() - started,
+        megabytes=size,
+    )
 
 
 def probe_all(
@@ -94,8 +126,15 @@ def probe_all(
     work_dir: str,
     keep: bool = False,
     timeout: float = CLONE_TIMEOUT,
+    max_megabytes: int = MAX_CHECKOUT_MB,
 ) -> Iterator[ProbeResult]:
     """Probe candidates in order, yielding each result as it is read."""
     os.makedirs(work_dir, exist_ok=True)
     for facts in every:
-        yield probe(facts, work_dir, keep=keep, timeout=timeout)
+        yield probe(
+            facts,
+            work_dir,
+            keep=keep,
+            timeout=timeout,
+            max_megabytes=max_megabytes,
+        )

@@ -90,3 +90,23 @@ def test_a_stale_checkout_is_replaced_rather_than_cloned_into(tmp_path):
     result = probe(facts, str(work), keep=True)
     assert result.worth_provisioning
     assert not os.path.exists(work / "again" / "junk.py")
+
+
+def test_a_checkout_over_the_budget_is_deleted_unread(tmp_path):
+    """A monorepo publishing many packages can exhaust a sandbox's disk."""
+    facts = repository(
+        tmp_path, "huge", {"tests/test_a.py": GIVEN, "data.bin": "x" * 2_200_000}
+    )
+    work = tmp_path / "work"
+    result = probe(facts, str(work), keep=True, max_megabytes=1)
+    assert result.assessment is None
+    assert "over the 1MB budget" in result.error
+    assert result.megabytes >= 2
+    assert not os.path.exists(work / "huge"), "an oversized checkout must not linger"
+
+
+def test_a_checkout_within_the_budget_is_read_as_usual(tmp_path):
+    facts = repository(tmp_path, "small", {"tests/test_a.py": GIVEN})
+    result = probe(facts, str(tmp_path / "work"), max_megabytes=500)
+    assert result.worth_provisioning
+    assert result.error == ""

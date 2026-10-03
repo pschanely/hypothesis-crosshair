@@ -1142,3 +1142,41 @@ for, quantified from the run rather than asserted: *the baseline found nothing
 in 100 examples across 2 seeds (200 draws)*.
 
 Nothing here reports anything anywhere, and the report says so.
+
+## B31. Scoring a decider, and why accuracy is the wrong headline
+
+Stage 5's agent cannot be adopted on the strength of looking plausible, so
+`evaluate.py` scores a decider against clusters whose answer is already known.
+The cases in `tools/discovery/cases/triage.jsonl` come from real runs -- the
+pipeline's own cluster output -- and are labelled by hand with the reason
+recorded alongside each one.
+
+**The errors do not cost the same, so the scorecard does not average them.**
+Calling someone else's correct code a bug is the only mistake that can put a
+draft in front of a third party, and one of those costs more than several
+missed findings. The scorecard counts, separately: *reaching a stranger*
+(predicted a project bug where there is none), *lost findings* (a real project
+bug sent to a stream nothing revisits), *wrong stream* (our own defect confused
+with an over-strong property), *deferred* (answered `unclear` where an answer
+existed -- safe, costs time), and *unusable* (nothing that parsed, which is
+scored as neither right nor wrong). The summary leads with the dangerous count,
+and the command exits non-zero on any of it.
+
+**The baseline is a stub that scores 3 of 4 with zero dangerous errors.** It
+defers the CrossHair artifact as `unclear`, which is the right thing to do
+when it cannot tell. Any real decider has to beat that, and beating it on
+accuracy while reaching a stranger is not beating it.
+
+**One case is a real CrossHair defect, reproduced for the purpose.**
+`CrossHairInternal: Numeric operation on symbolic while not tracing` at
+`src/attr/_make.py:2668`, reached by two attrs tests and clustered as one.
+That run also fired the A/B divergence check, so observability changed the
+outcome for those tests as well.
+
+**Mutation testing found one real gap and two stale anchors.** Nothing asserted
+that an unusable answer appears in the confusion table, so a decider that
+answered nothing could have been indistinguishable from one that answered.
+Nine mutations now fail the scorer's tests.
+
+The case set is small -- four clusters, two projects. It is a floor, not a
+benchmark, and it grows as runs produce clusters worth labelling.

@@ -770,6 +770,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                             "message": group.signature.message,
                             "nodeids": group.nodeids,
                             "examples": group.examples,
+                            "sample": group.sample,
                         }
                         for group in _clusters_of(report)
                     ],

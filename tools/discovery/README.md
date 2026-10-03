@@ -86,6 +86,28 @@ evidence, so triage cannot stand in for the replay that did not run.
 A trophy draft is a record. This tool never reports anything to a third-party
 project.
 
+### Scoring a decider
+
+`python -m discovery.evaluate_cli --cases cases/triage.jsonl --decider "<cmd>"`
+runs a decider over clusters whose answer is known and reports what it got
+right and, separately, what kind of wrong it got.
+
+Accuracy alone is the wrong measure, because the errors do not cost the same:
+
+- **reaching a stranger** -- calling someone else's correct code, or one of our
+  own defects, a project bug. The only error that can put a draft in front of a
+  third party.
+- **lost findings** -- a real project bug routed to a stream nothing revisits.
+- **wrong stream** -- our own defect confused with an over-strong property.
+- **deferred** -- answered `unclear` where an answer existed. Safe, costs time.
+- **unusable** -- no answer that parsed. Scored as neither right nor wrong.
+
+The command exits non-zero if anything reached a stranger or was unusable.
+
+`cases/triage.jsonl` holds clusters taken from real runs, each labelled by hand
+with the reason recorded. It is a regression asset: a decider change that
+starts calling a CrossHair artifact a project bug fails here first.
+
 ## What it reports
 
 | Verdict | Meaning |

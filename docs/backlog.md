@@ -1641,6 +1641,10 @@ of 3, and the pipeline's verdict for pydantic's `test_datetime_datetime` goes
 from `pending_validation` to `no_signal` on 3 of 3 runs. Eleven regression
 tests were added; seven of them fail with the check removed.
 
+Checked for the obvious regression: a stricter check means more discards,
+which would cost effective examples. jmespath and hpack, both clean before,
+come back identical afterwards -- 7 and 9 `no_signal`.
+
 Worth noting what this does *not* do. It converts a corrupted test case into
 a discarded one, which is right, but a replay that desynchronizes is still
 desynchronizing. If discards become common on a project, the cause is the

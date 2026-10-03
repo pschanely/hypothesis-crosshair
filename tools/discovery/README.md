@@ -112,6 +112,7 @@ defect.
 | `runner.py` | One pytest invocation for a given arm and tier |
 | `telemetry.py` | Observability JSONL parsing, completion histograms, coverage |
 | `classify.py` | Baseline gate and the three-way differential |
+| `cluster.py` | Groups failures by defect: exception, frame, scrubbed message |
 | `validate.py` | Clean-room replay of a reported example |
 | `pipeline.py` | Stage orchestration |
 | `store.py` | SQLite durable state: work queue, verdicts, version-keyed cache |

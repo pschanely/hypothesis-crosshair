@@ -110,10 +110,11 @@ def test_repairs_stop_after_the_budget():
     assert MAX_REPAIRS == 3
 
 
-def test_every_mapped_module_names_a_plausible_distribution():
+def test_every_mapped_module_names_an_installable_distribution():
+    """The table is an allowlist, so every entry must be usable as given."""
     for module, dist in MODULE_DISTRIBUTIONS.items():
-        assert dist and " " not in dist
-        assert module != dist or module == "hypothesis"
+        assert module.isidentifier(), module
+        assert dist and not set(dist) & set(" \t;&|<>$`"), dist
 
 
 def test_a_flags_value_is_not_reported_as_a_flag():
@@ -161,3 +162,63 @@ def test_an_unrepairable_collection_failure_asks_for_a_person(tmp_path, capsys):
 
     assert main(_broken_project(tmp_path, "--no-such-plugin-flag")) == 2
     assert "needs a person" in capsys.readouterr().err
+
+
+DESELECTED = "7 deselected, 2 warnings in 0.23s\n"
+
+COLLECT_ERRORS = """\
+ERROR tests/integrations/wsgi/test_wsgi.py
+ERROR tests/test_client.py - sentry_sdk.integrations.DidNotEnable: executing is not installed
+!!!!!!!!!!!!!!!!!!! Interrupted: 2 errors during collection !!!!!!!!!!!!!!!!!!!!
+"""
+
+
+def test_a_project_that_deselects_its_own_property_tests_is_overridden():
+    """virtualenv sets addopts = -m 'not property', so none of them run."""
+    repair = diagnose(DESELECTED)
+    assert repair.pytest_args == ["-m", ""]
+    assert repair.packages == []
+
+
+def test_a_partly_deselected_run_is_left_alone():
+    """Tests that ran are a working harness, whatever else was filtered out."""
+    assert diagnose("7 passed, 2 deselected in 1.5s") is None
+
+
+def test_a_missing_marker_names_the_plugin_that_registers_it():
+    repair = diagnose(
+        "INTERNALERROR> Failed: 'thread_unsafe' not found in `markers` configuration"
+    )
+    assert repair.packages == ["pytest-run-parallel"]
+
+
+def test_an_unknown_marker_is_not_guessed_at():
+    assert (
+        diagnose("Failed: 'bespoke_marker' not found in `markers` configuration")
+        is None
+    )
+
+
+def test_modules_that_cannot_be_imported_are_skipped_not_installed():
+    repair = diagnose(COLLECT_ERRORS)
+    assert repair.packages == []
+    assert repair.pytest_args == [
+        "--ignore=tests/integrations/wsgi/test_wsgi.py",
+        "--ignore=tests/test_client.py",
+    ]
+    assert "test_client.py" in repair.rationale, "an ignored module must be named"
+
+
+def test_a_collection_error_from_crosshair_is_never_skipped():
+    """Skipping it would hide the defect the pipeline exists to find."""
+    text = (
+        "ERROR tests/test_a.py - crosshair.util.CrossHairInternal: boom\n"
+        "!!! Interrupted: 1 errors during collection !!!\n"
+    )
+    assert diagnose(text) is None
+
+
+def test_a_known_test_dependency_is_installed_rather_than_skipped():
+    repair = diagnose("E   ModuleNotFoundError: No module named 'dirty_equals'")
+    assert repair.packages == ["dirty-equals"]
+    assert repair.pytest_args == []

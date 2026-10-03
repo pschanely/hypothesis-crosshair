@@ -415,6 +415,7 @@ def _run_per_test(
             print(
                 f"  [{index}/{journal.total}] {nodeid} -> "
                 f"{known.verdict.value} (cached)",
+                file=sys.stderr,
                 flush=True,
             )
             continue
@@ -434,6 +435,7 @@ def _run_per_test(
         print(
             f"  [{index}/{journal.total}] {nodeid} -> "
             + ", ".join(sorted({c.verdict.value for c in one.classifications})),
+            file=sys.stderr,
             flush=True,
         )
     return merged
@@ -482,6 +484,7 @@ def _retry_no_signal(build, run_root: str, report: PipelineReport, extra: int) -
                 print(
                     f"  retry {entry.nodeid} -> {found.verdict.value} "
                     f"on attempt {entry.attempts}",
+                    file=sys.stderr,
                     flush=True,
                 )
                 break

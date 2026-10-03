@@ -52,8 +52,30 @@ _MISSING_MODULE_RE = re.compile(
     r"(?:ModuleNotFoundError|ImportError): No module named '(?P<module>[\w.]+)'"
 )
 
-#: Importable names whose distribution is spelled differently.
+#: Markers a project's strict configuration may require, mapped to the plugin
+#: that registers them. pytest aborts collection when one is missing.
+MARKER_DISTRIBUTIONS = {
+    "thread_unsafe": "pytest-run-parallel",
+}
+
+_MISSING_MARKER_RE = re.compile(
+    r"'(?P<marker>[\w-]+)' not found in `markers` configuration"
+)
+
+_DESELECTED_RE = re.compile(r"(?P<count>\d+) deselected")
+_SELECTED_RE = re.compile(r"\d+ (?:passed|failed|error|skipped|xfailed|xpassed)")
+
+_COLLECT_ERROR_RE = re.compile(r"^ERROR (?P<path>\S+\.py)", re.MULTILINE)
+
+#: Importable names whose distribution is spelled differently, or whose
+#: distribution name is the module's with underscores replaced. Guessing a
+#: distribution from a module name installs whatever happens to hold that
+#: name on PyPI, so this stays an explicit list.
 MODULE_DISTRIBUTIONS = {
+    "dirty_equals": "dirty-equals",
+    "pytz": "pytz",
+    "time_machine": "time-machine",
+    "pytest_examples": "pytest-examples",
     "pytest_benchmark": "pytest-benchmark",
     "pytest_asyncio": "pytest-asyncio",
     "pytest_mock": "pytest-mock",
@@ -136,7 +158,49 @@ def diagnose(text: str) -> Optional[Repair]:
                 rationale=f"a test module imports {module}, supplied by {dist}",
                 packages=[dist],
             )
+
+    marker = _MISSING_MARKER_RE.search(text)
+    if marker and marker.group("marker") in MARKER_DISTRIBUTIONS:
+        name = marker.group("marker")
+        dist = MARKER_DISTRIBUTIONS[name]
+        return Repair(
+            name="install-marker-plugin",
+            rationale=f"the suite marks tests {name!r}, registered by {dist}",
+            packages=[dist],
+        )
+
+    deselected = _DESELECTED_RE.search(text)
+    if deselected and not _SELECTED_RE.search(text):
+        return Repair(
+            name="override-marker-filter",
+            rationale=(
+                f"the project's own configuration deselected all "
+                f"{deselected.group('count')} of these tests"
+            ),
+            pytest_args=["-m", ""],
+        )
+
+    errors = _COLLECT_ERROR_RE.findall(text)
+    if errors and not _mentions_crosshair(text):
+        return Repair(
+            name="skip-unimportable-modules",
+            rationale=(
+                "these test modules could not be imported, so none of their "
+                f"tests can run: {', '.join(errors)}"
+            ),
+            pytest_args=[f"--ignore={path}" for path in errors],
+        )
     return None
+
+
+def _mentions_crosshair(text: str) -> bool:
+    """Whether a failure implicates the solver rather than the project.
+
+    Ignoring a module that CrossHair itself broke would hide the defect the
+    pipeline exists to find, so such a failure is escalated instead.
+    """
+    lowered = text.lower()
+    return "crosshair" in lowered or "hypothesis_crosshair" in lowered
 
 
 def plan(text: str, applied: Sequence[str] = ()) -> Optional[Repair]:

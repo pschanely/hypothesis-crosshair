@@ -106,7 +106,30 @@ The command exits non-zero if anything reached a stranger or was unusable.
 
 `cases/triage.jsonl` holds clusters taken from real runs, each labelled by hand
 with the reason recorded. It is a regression asset: a decider change that
-starts calling a CrossHair artifact a project bug fails here first.
+starts calling a CrossHair artifact a project bug fails here first. A case
+whose `project` is a path inside this repository is resolved on load, so a
+decider can read that source; one naming a project checked out elsewhere is
+left unresolved and the decider sees only the cluster.
+
+### The shipped decider
+
+`deciders/claude_decider.py` is a decider backed by the `claude` CLI. It reads
+a cluster on stdin and prints a verdict, so it plugs into `--triage-command`
+and `--decider` unchanged:
+
+```
+python -m discovery.cli ... --triage-command "python deciders/claude_decider.py"
+```
+
+It gives the model read-only access to the project under test -- `Read`, `Grep`
+and `Glob`, nothing that writes or executes -- because the project is
+third-party code this pipeline treats as untrusted and nothing in this judgment
+needs to run it. `HCD_DECIDER_MODEL` and `HCD_DECIDER_TIMEOUT` override the
+model and the per-cluster timeout.
+
+The prompt tells it that calling a project's correct code a bug is the most
+costly error available and that `unclear` is always safe. That is the same
+asymmetry the scorecard measures.
 
 ## What it reports
 

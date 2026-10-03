@@ -8,11 +8,19 @@ dangerous one first.
 """
 
 import json
+import os
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence
 
 from .cluster import Signature
 from .triage import Decider, TriageCategory, TriageItem, parse_verdict
+
+
+def _resolve(root: str, project: str) -> str:
+    if not project or os.path.isabs(project):
+        return project
+    candidate = os.path.normpath(os.path.join(root, project))
+    return candidate if os.path.isdir(candidate) else project
 
 
 @dataclass
@@ -153,7 +161,14 @@ class Scorecard:
 
 
 def load_cases(path: str) -> List[Case]:
-    """Read labelled cases from a JSONL file."""
+    """Read labelled cases from a JSONL file.
+
+    A relative ``project`` is resolved against the case file's parent
+    directory, so a case whose source ships with this tool keeps working
+    wherever the repository is checked out. One that names a project not
+    present here stays unresolved, and a decider simply sees no source.
+    """
+    root = os.path.dirname(os.path.dirname(os.path.abspath(path)))
     cases = []
     with open(path) as handle:
         for line in handle:
@@ -175,7 +190,7 @@ def load_cases(path: str) -> List[Case]:
                         ),
                         nodeids=list(raw.get("nodeids", [])),
                         examples=list(raw.get("examples", [])),
-                        project=raw.get("project", ""),
+                        project=_resolve(root, raw.get("project", "")),
                         sample=raw.get("sample", ""),
                     ),
                 )

@@ -1180,3 +1180,38 @@ Nine mutations now fail the scorer's tests.
 
 The case set is small -- four clusters, two projects. It is a floor, not a
 benchmark, and it grows as runs produce clusters worth labelling.
+
+## B32. The triage decider, and why 4/4 is not a result yet
+
+Stage 5's named deliverable is the agent at failure triage, and
+`deciders/claude_decider.py` is it: a subprocess that reads a cluster on
+stdin, asks the `claude` CLI, and prints a verdict. It plugs into
+`--triage-command` and `--decider` unchanged, because the seam was built
+first.
+
+**It gets read-only access to the project** -- `Read`, `Grep`, `Glob`, nothing
+that writes or executes. Triage needs the source, and the project is
+third-party code this pipeline treats as untrusted; nothing in this judgment
+needs to run it. **The prompt states the error asymmetry** the scorecard
+measures: calling a project's correct code a bug is the most costly mistake
+available, and `unclear` is always safe.
+
+**It scores 4/4 with zero dangerous errors, three runs in a row.** On the
+checksum case it read the source and named the actual root cause -- `return
+total or 1`, which turns a real checksum of 0 into 1 -- with file and line.
+On the attrs case it identified a CrossHair artifact from the traceback alone,
+with no source available.
+
+**That number is not yet evidence, and it should not be quoted as though it
+were.** Four cases, two projects, and the same person wrote the labels, the
+prompt and the scorer. The one thing it does establish is the absence of the
+error that matters: across twelve judgments nothing was routed toward a third
+party that should not have been. A set this small cannot distinguish a good
+decider from one tuned to it, and the honest next step is more labelled
+clusters from projects whose failures nobody has looked at yet.
+
+**A case file carrying project names rather than paths gave source access by
+accident.** The first scoring run happened to work because the decider's cwd
+sat above the fixture. `load_cases` now resolves a relative project path
+against the repository, and a case naming a checkout that is not here stays
+unresolved, so a decider visibly gets only the cluster.

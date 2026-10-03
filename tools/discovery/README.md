@@ -46,6 +46,26 @@ the CrossHair, plugin and Python versions. Two things follow:
 A test claimed three times without ever producing a verdict is abandoned, so a
 test that reliably destroys its worker cannot stop a run from finishing.
 
+### Triage
+
+`--triage-command` hands each failure cluster to an external program, one
+invocation per cluster. The program receives the cluster as JSON on stdin --
+exception, frame, normalized message, node ids, examples, and one unscrubbed
+traceback -- and must print a JSON object:
+
+```json
+{"category": "project_bug", "confidence": 0.9, "reasoning": "...", "evidence": ["src/pkg/a.py:10"]}
+```
+
+`category` is one of `project_bug`, `overstrong_property`, `crosshair_artifact`
+or `unclear`. An answer that does not parse, a command that exits non-zero, and
+a command that hangs past its timeout each abandon that one cluster and leave
+the rest of the batch alone; nothing unvalidated is ever recorded.
+
+The decider lives outside this tool so that a model can answer here without the
+pipeline depending on one. `--triage-budget` bounds how many clusters one
+invocation will decide.
+
 ## What it reports
 
 | Verdict | Meaning |
@@ -113,6 +133,7 @@ defect.
 | `telemetry.py` | Observability JSONL parsing, completion histograms, coverage |
 | `classify.py` | Baseline gate and the three-way differential |
 | `cluster.py` | Groups failures by defect: exception, frame, scrubbed message |
+| `triage.py` | Triage queue, the answer schema, and the decider seam |
 | `validate.py` | Clean-room replay of a reported example |
 | `pipeline.py` | Stage orchestration |
 | `store.py` | SQLite durable state: work queue, verdicts, version-keyed cache |

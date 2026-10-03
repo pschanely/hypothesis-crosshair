@@ -1071,3 +1071,44 @@ nothing, and neither of these could.
 that passed twice immediately after, with nothing in the change touching the
 plugin. Consistent with B23: that suite runs CrossHair, and CrossHair's search
 is not reproducible.
+
+## B29. Triage: the queue, the schema gate, and what scrubbing takes away
+
+Stage 5 puts a model at failure triage. Everything around that judgment stays
+deterministic, so this is the queue, the item a decider reads, and the schema
+its answer has to satisfy -- the decider itself is a seam.
+
+**The work queue was generalized rather than copied.** It now carries a `kind`
+and a JSON payload, so per-test runs and per-cluster triage share one
+implementation of claiming, leases, the attempt bound and progress. A second
+copy of that logic is how two queues drift apart.
+
+**A decider runs as a subprocess**, one invocation per cluster, reading the
+cluster as JSON on stdin and printing a JSON object. That keeps a model out of
+this tool's dependencies, and it means a decider that hangs costs a timeout
+rather than the run. An answer that does not parse, a non-zero exit and a
+timeout each abandon one cluster and leave the batch alone.
+
+**The schema gate is the point, not paperwork.** `parse_verdict` refuses a
+bare string, a missing field, an invented category, a confidence outside 0..1
+or given as a bool or a word, empty reasoning, and evidence that is not a list
+of strings. An answer allowed through unvalidated becomes durable state that
+nothing downstream can distinguish from a checked one.
+
+**Scrubbing the signature removes what a reader needs.** The first live run
+triaged the demo project's flaky test as `unclear`, because a decider sees the
+normalized message -- `assert N < N` -- and the normalization that makes two
+sightings of one defect agree had already removed the `random.random()` call
+that explains it. A cluster now also carries one unscrubbed traceback, which
+affects no identity and restores the context. With it, the same three clusters
+come back `project_bug`, `overstrong_property` and `unclear`, and the
+`project_bug` is the planted library defect.
+
+**Two mutation anchors went stale** when the queue was generalized, and the
+suite reported them as uncaught rather than skipped-and-forgotten. Both were
+refreshed and both behaviors are still caught. 28 mutations across the three
+suites now fail their tests when introduced.
+
+Still deterministic work before an agent is useful here: nothing yet carries a
+triaged cluster onward, so `project_bug` does not reach the trophy track and
+`crosshair_artifact` does not reach the CrossHair stream.

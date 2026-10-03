@@ -204,3 +204,10 @@ def test_assertion_introspection_is_not_part_of_the_message():
     first = normalize_message(template.format(7, 8, "ab"))
     second = normalize_message(template.format(3, 4, "zz"))
     assert first == second == "assert N == N"
+
+
+def test_a_cluster_keeps_one_unscrubbed_traceback():
+    """The signature is scrubbed; whoever triages it still needs to read one."""
+    item = failure("tests/t.py::test_a")
+    found = cluster([item], {item.nodeid: detail(item.nodeid)}, PROJECT)
+    assert "assert -73 >= 0" in found[0].sample

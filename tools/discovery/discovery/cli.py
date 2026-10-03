@@ -11,7 +11,10 @@ from dataclasses import replace
 from typing import Dict, List, Optional
 
 from . import cluster as cluster_mod
-from . import provenance, telemetry
+from . import provenance
+from . import store as store_mod
+from . import telemetry
+from . import triage as triage_mod
 from .model import Classification, RunResult, SearchProgress, Verdict
 from .pipeline import Pipeline, PipelineConfig, PipelineReport
 from .runner import EnvSpec, Runner
@@ -301,12 +304,16 @@ class _Journal:
     def prepare(self, nodeids: List[str]) -> None:
         self.total = len(nodeids)
         self.store.enqueue(
-            self.run_id, self.project, [(self.key(n), n) for n in nodeids]
+            self.run_id,
+            store_mod.RUN_TEST,
+            [(self.key(n), {"nodeid": n, "project": self.project}) for n in nodeids],
         )
 
     def next(self) -> Optional[str]:
-        item = self.store.claim(self.run_id, time.time(), lease_seconds=0.0)
-        return item["nodeid"] if item else None
+        item = self.store.claim(
+            self.run_id, store_mod.RUN_TEST, time.time(), lease_seconds=0.0
+        )
+        return item["payload"]["nodeid"] if item else None
 
     def completed(self) -> List[Classification]:
         """Verdicts this run already holds, from the process that recorded them."""
@@ -331,7 +338,10 @@ class _Journal:
                 self.store.complete(self.key(nodeid), self.run_id, item)
                 return
         self.store.abandon(
-            self.run_id, self.key(nodeid), "the run produced no verdict for it"
+            self.run_id,
+            store_mod.RUN_TEST,
+            self.key(nodeid),
+            "the run produced no verdict for it",
         )
 
 
@@ -445,6 +455,30 @@ def _retry_no_signal(build, run_root: str, report: PipelineReport, extra: int) -
                 break
 
 
+def _triage(store: Store, run_id: str, report: PipelineReport, args) -> None:
+    """Hand each failure cluster to the configured decider."""
+    groups = _clusters_of(report)
+    if not groups:
+        return
+    triage_mod.enqueue_clusters(store, run_id, groups, report.project_dir)
+    outcome = triage_mod.run_triage(
+        store,
+        run_id,
+        triage_mod.CommandDecider(shlex.split(args.triage_command)),
+        time.time,
+        budget=args.triage_budget,
+    )
+    print(f"triage  ({outcome.total} clusters)", file=sys.stderr)
+    for key, verdict in outcome.decided.items():
+        print(
+            f"    {verdict.category.value} ({verdict.confidence:.2f}) {key}: "
+            f"{verdict.reasoning[:100]}",
+            file=sys.stderr,
+        )
+    for key, reason in outcome.rejected.items():
+        print(f"    REJECTED {key}: {reason[:140]}", file=sys.stderr)
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         prog="discovery",
@@ -522,12 +556,29 @@ def main(argv: Optional[List[str]] = None) -> int:
             "commit and these versions."
         ),
     )
+    parser.add_argument(
+        "--triage-command",
+        default=None,
+        help=(
+            "shell command that triages one failure cluster. It receives the "
+            "cluster as JSON on stdin and must print a JSON object with "
+            "category, confidence and reasoning. Requires --store."
+        ),
+    )
+    parser.add_argument(
+        "--triage-budget",
+        type=int,
+        default=triage_mod.DEFAULT_BUDGET,
+        help="clusters to triage in this invocation",
+    )
     parser.add_argument("--json", action="store_true", help="emit JSON instead of text")
     parser.add_argument("nodeids", nargs="*", help="restrict to these node ids")
     args = parser.parse_args(argv)
 
     if args.resume and not (args.store and args.per_test):
         parser.error("--resume needs --store and --per-test")
+    if args.triage_command and not args.store:
+        parser.error("--triage-command needs --store to record its answers")
 
     project = os.path.abspath(args.project)
     run_id = args.resume or uuid.uuid4().hex[:12]
@@ -592,10 +643,23 @@ def main(argv: Optional[List[str]] = None) -> int:
             report = build(run_root).run(args.nodeids or None)
         if args.retry_no_signal > 0:
             _retry_no_signal(build, run_root, report, args.retry_no_signal)
+        if store is not None and args.triage_command:
+            _triage(store, run_id, report, args)
         if store is not None:
             store.record_verdicts(run_id, report.classifications)
+            counts = {
+                kind: store.progress(run_id, kind)
+                for kind in (store_mod.RUN_TEST, store_mod.TRIAGE_CLUSTER)
+            }
+            summary = ", ".join(
+                f"{kind} {state}={n}"
+                for kind, states in counts.items()
+                for state, n in sorted(states.items())
+            )
             print(
-                f"run {run_id}: {store.progress(run_id)}", file=sys.stderr, flush=True
+                f"run {run_id}: {summary or 'nothing queued'}",
+                file=sys.stderr,
+                flush=True,
             )
     finally:
         if store is not None:

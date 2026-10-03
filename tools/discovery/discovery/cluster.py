@@ -118,11 +118,20 @@ class Signature:
         return f"{self.exception_type or 'no exception'} at {where}: {what}"
 
 
+#: Characters of one unscrubbed traceback kept for whoever triages a cluster.
+#:
+#: The signature is scrubbed so that sightings of one defect agree, which also
+#: removes what a reader needs to tell what happened. One raw sample restores
+#: that without affecting identity.
+SAMPLE_LIMIT = 4000
+
+
 @dataclass
 class Cluster:
     signature: Signature
     nodeids: List[str] = field(default_factory=list)
     examples: List[str] = field(default_factory=list)
+    sample: str = ""
 
     @property
     def size(self) -> int:
@@ -162,4 +171,7 @@ def cluster(
         entry.nodeids.append(item.nodeid)
         if item.falsifying_example:
             entry.examples.append(item.falsifying_example)
+        detail = details.get(item.nodeid)
+        if not entry.sample and detail is not None and detail.longrepr:
+            entry.sample = detail.longrepr[-SAMPLE_LIMIT:]
     return sorted(found.values(), key=lambda c: (-c.size, c.signature.describe()))

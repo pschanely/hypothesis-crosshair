@@ -1,14 +1,17 @@
 """The baseline gate and the three-way differential classifier.
 
-Every input here must come from a tier-A run. Tier-B telemetry may be attached
-as supporting evidence, but never decides a verdict.
+Every input here must come from a tier-A run. Tier-B telemetry is attached to
+a classification as evidence and is never read to decide one: observability
+realizes symbolic draws and perturbs the search, so a CrossHair-backed
+observability run is known to diverge from the run being judged. What it
+observes becomes a clue -- see ``telemetry.clues_from`` -- which calls for a
+further tier-A run rather than settling anything itself.
 """
 
 import enum
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence
 
-from . import telemetry
 from .model import (
     CaseOutcome,
     Classification,
@@ -19,12 +22,6 @@ from .model import (
     Tier,
     Verdict,
 )
-
-#: Share of solver iterations lost to nondeterminism before a test is dropped.
-NONDETERMINISM_QUARANTINE_RATE = 0.5
-
-#: Completion text CrossHair emits when it believes it closed the search space.
-EXHAUSTED_COMPLETION = "exhausted all paths"
 
 
 class Stability(str, enum.Enum):
@@ -159,17 +156,8 @@ def classify(
             result.verdict = Verdict.SHARED_FIND
             result.rationale = "both arms fail; not attributable to CrossHair"
         else:
-            exhausted = _claims_exhausted(stats)
-            result.verdict = (
-                Verdict.SOUNDNESS_SUSPECT
-                if exhausted
-                else Verdict.CROSSHAIR_FALSE_NEGATIVE
-            )
-            result.rationale = (
-                "baseline fails but CrossHair reported the path space exhausted"
-                if exhausted
-                else "baseline fails but CrossHair does not"
-            )
+            result.verdict = Verdict.CROSSHAIR_FALSE_NEGATIVE
+            result.rationale = "baseline fails but CrossHair does not"
         return result
 
     if crosshair is Outcome.FAILED:
@@ -192,26 +180,8 @@ def classify(
             )
         return result
 
-    if (
-        stats is not None
-        and telemetry.nondeterminism_rate(stats) >= NONDETERMINISM_QUARANTINE_RATE
-    ):
-        result.verdict = Verdict.QUARANTINED_NONDETERMINISTIC
-        result.rationale = (
-            "most solver iterations were discarded for detected nondeterminism; "
-            "CrossHair's check is deep, so ordinary internal caching is enough "
-            "to trip it. Not treated as a CrossHair defect."
-        )
-        return result
-
     result.rationale = "neither arm found a failure"
     return result
-
-
-def _claims_exhausted(stats: Optional[CompletionStats]) -> bool:
-    if stats is None:
-        return False
-    return any(EXHAUSTED_COMPLETION in text for text in stats.counts)
 
 
 def detect_observer_effect(

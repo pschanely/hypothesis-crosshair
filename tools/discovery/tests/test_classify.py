@@ -96,7 +96,9 @@ def test_missed_failure_is_a_false_negative():
     assert verdict.verdict is Verdict.CROSSHAIR_FALSE_NEGATIVE
 
 
-def test_missed_failure_after_claiming_exhaustion_is_a_soundness_suspect():
+def test_an_exhaustion_claim_from_telemetry_does_not_change_the_verdict():
+    """Observability perturbs the search, so the run that claimed exhaustion
+    is not the run being judged."""
     stats = CompletionStats(counts={"exhausted all paths - nothing else to do": 3})
     verdict = classify(
         NODE,
@@ -104,7 +106,8 @@ def test_missed_failure_after_claiming_exhaustion_is_a_soundness_suspect():
         crosshair_run=run(Outcome.PASSED),
         stats=stats,
     )
-    assert verdict.verdict is Verdict.SOUNDNESS_SUSPECT
+    assert verdict.verdict is Verdict.CROSSHAIR_FALSE_NEGATIVE
+    assert verdict.completion is stats, "telemetry is attached as evidence"
 
 
 def test_unstable_baseline_is_quarantined_before_anything_else():
@@ -126,7 +129,7 @@ def test_crash_outranks_every_other_signal():
     assert verdict.verdict is Verdict.CROSSHAIR_CRASH
 
 
-def test_nondeterminism_quarantines_rather_than_blaming_crosshair():
+def test_nondeterminism_in_telemetry_does_not_change_the_verdict():
     stats = CompletionStats(
         counts={"ignored due to non determinism detected": 9, "completed normally": 1},
         crosshair_cases=10,
@@ -137,8 +140,42 @@ def test_nondeterminism_quarantines_rather_than_blaming_crosshair():
         crosshair_run=run(Outcome.PASSED),
         stats=stats,
     )
-    assert verdict.verdict is Verdict.QUARANTINED_NONDETERMINISTIC
-    assert not verdict.is_crosshair_defect
+    assert verdict.verdict is Verdict.NO_SIGNAL
+
+
+def test_no_telemetry_can_change_any_verdict():
+    """The rule, rather than one instance of it.
+
+    Telemetry comes from a CrossHair-backed observability run, which realizes
+    symbolic draws and so diverges from the run being judged. Whatever it
+    says, the verdict must be the one the tier-A outcomes give.
+    """
+    loud = CompletionStats(
+        counts={
+            "ignored due to non determinism detected": 50,
+            "exhausted all paths - nothing else to do": 50,
+        },
+        crosshair_cases=100,
+        realizing_cases=100,
+        realizations=500,
+    )
+    for baseline_outcomes, crosshair_outcome in (
+        ((Outcome.PASSED, Outcome.PASSED), Outcome.PASSED),
+        ((Outcome.FAILED, Outcome.FAILED), Outcome.PASSED),
+        ((Outcome.FAILED, Outcome.FAILED), Outcome.FAILED),
+    ):
+        without = classify(
+            NODE,
+            baseline=gate(*baseline_outcomes),
+            crosshair_run=run(crosshair_outcome),
+        )
+        with_telemetry = classify(
+            NODE,
+            baseline=gate(*baseline_outcomes),
+            crosshair_run=run(crosshair_outcome),
+            stats=loud,
+        )
+        assert without.verdict is with_telemetry.verdict, baseline_outcomes
 
 
 def test_telemetry_tier_may_not_decide_a_verdict():

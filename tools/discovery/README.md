@@ -139,12 +139,10 @@ asymmetry the scorecard measures.
 | `crosshair_false_positive` | CrossHair reported a failure that does not reproduce without it |
 | `pending_validation` | The replay was inconclusive. **Not** a refutation |
 | `shared_find` | Both arms fail; not attributable to CrossHair |
-| `soundness_suspect` | Baseline fails after CrossHair reported the path space exhausted |
 | `crosshair_false_negative` | Baseline fails, CrossHair does not |
 | `crosshair_crash` / `crosshair_timeout` | The solver arm died or ran out of budget |
 | `observer_effect` | Outcome differs between the verdict and telemetry tiers |
 | `quarantined_unstable` | Baseline outcomes differed across seeds |
-| `quarantined_nondeterministic` | Most solver iterations were discarded for nondeterminism |
 | `no_signal` | Neither arm found anything |
 
 Trophy candidates are drafts for a human. **This code has no write path to any

@@ -37,13 +37,11 @@ class Verdict(str, enum.Enum):
     TROPHY_CANDIDATE = "trophy_candidate"
     CROSSHAIR_FALSE_POSITIVE = "crosshair_false_positive"
     SHARED_FIND = "shared_find"
-    SOUNDNESS_SUSPECT = "soundness_suspect"
     CROSSHAIR_FALSE_NEGATIVE = "crosshair_false_negative"
     NO_SIGNAL = "no_signal"
     CROSSHAIR_CRASH = "crosshair_crash"
     CROSSHAIR_TIMEOUT = "crosshair_timeout"
     QUARANTINED_UNSTABLE = "quarantined_unstable"
-    QUARANTINED_NONDETERMINISTIC = "quarantined_nondeterministic"
     OBSERVER_EFFECT = "observer_effect"
     PENDING_VALIDATION = "pending_validation"
     PRE_EXISTING_FAILURE = "pre_existing_failure"
@@ -57,7 +55,6 @@ NEEDS_HUMAN_REVIEW = frozenset({Verdict.TROPHY_CANDIDATE})
 CROSSHAIR_DEFECT_VERDICTS = frozenset(
     {
         Verdict.CROSSHAIR_FALSE_POSITIVE,
-        Verdict.SOUNDNESS_SUSPECT,
         Verdict.CROSSHAIR_FALSE_NEGATIVE,
         Verdict.CROSSHAIR_CRASH,
         Verdict.CROSSHAIR_TIMEOUT,

@@ -45,7 +45,6 @@ INCONCLUSIVE_VERDICTS = frozenset(
     {
         Verdict.NO_BASELINE_RESULT,
         Verdict.QUARANTINED_UNSTABLE,
-        Verdict.QUARANTINED_NONDETERMINISTIC,
         Verdict.CROSSHAIR_CRASH,
         Verdict.CROSSHAIR_TIMEOUT,
         Verdict.PRE_EXISTING_FAILURE,

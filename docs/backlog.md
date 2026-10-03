@@ -1285,3 +1285,53 @@ corpus roughly doubled both, and did not change the conclusion that real
 Hypothesis suites spend their time in CrossHair's own internals -- the regex
 engine, the symbolic containers, string find -- rather than in the catalogued
 Python surface that `fuzz_core_test` enumerates.
+
+## B34. Observability may not decide anything
+
+B33 left open whether `classify.py`'s stated rule or its behavior was wrong.
+The rule is right, and the reason is stronger than consistency: a
+CrossHair-backed observability run realizes symbolic draws and perturbs the
+search, so it is **known to diverge** from the run being judged. An
+observability run gives clues for running other, more trustworthy tests. It
+settles nothing.
+
+**Two verdicts were being decided from it, not one.** Alongside
+`QUARANTINED_NONDETERMINISTIC`, the `STABLE_FAIL` branch read
+`_claims_exhausted(stats)` to choose between `SOUNDNESS_SUSPECT` and
+`CROSSHAIR_FALSE_NEGATIVE` -- and "exhausted all paths" is a completion count,
+which only exists in the telemetry tier. Both are gone from `classify`, and a
+test now asserts the rule itself rather than one instance of it: for every
+baseline/CrossHair combination, the verdict with loud telemetry attached must
+equal the verdict without it.
+
+**Both verdicts are removed rather than left unreachable.** Nothing could
+produce them once telemetry was disallowed, and an enum member nothing
+produces is the same dead state as the cache that nothing called. Neither had
+ever been produced on the corpus. Bringing `soundness_suspect` back is worth
+doing, because an unsoundness claim is the most valuable thing this pipeline
+could report -- but it needs a tier-A source. CrossHair's exhaustion claim
+would have to reach the verdict tier some other way than through
+observability, which it currently does not.
+
+**What those observations became.** `telemetry.clues_from` reports them as
+clues, each naming the run that would settle it: discarded-for-nondeterminism
+iterations, an exhaustion claim, and a search that ran mostly concretely
+under a verdict that depends on the solver having searched. The report prints
+them under a heading that says they are never verdicts.
+
+On hyperlink, live:
+
+    clues from the observability tier  (1, never verdicts)
+        ...::test_hostnames_ascii
+            100% of solver iterations realized a symbolic value, so the
+            search ran mostly concretely
+            -> re-run with a larger budget before treating
+               'crosshair_false_negative' as evidence the solver explored this
+
+**Two bugs surfaced in wiring that up, both from running it.** Telemetry is
+keyed by Hypothesis property name while everything else is keyed by pytest
+node id, so the first version matched nothing; `pipeline.stats_for` already
+bridged that and is now shared rather than private. Then the clue still did
+not fire, because a node id can carry an `observer_effect` classification
+*alongside* its real verdict, and building a node-id-to-verdict map let the
+annotation overwrite the verdict it should have been read against.

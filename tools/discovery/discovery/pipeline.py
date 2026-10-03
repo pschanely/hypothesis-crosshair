@@ -157,7 +157,7 @@ class Pipeline:
                     baseline=gate[nodeid],
                     crosshair_run=report.crosshair_run,
                     validation=validations.get(nodeid),
-                    stats=_stats_for(stats_by_name, nodeid),
+                    stats=stats_for(stats_by_name, nodeid),
                     search=report.crosshair_run.search.get(nodeid),
                 )
             )
@@ -236,7 +236,7 @@ def select(inventory: Sequence[str], selectors: Sequence[str]) -> List[str]:
     return chosen
 
 
-def _stats_for(stats_by_name: Dict[str, object], nodeid: str):
+def stats_for(stats_by_name: Dict[str, object], nodeid: str):
     """Match observability's property name against a pytest node id."""
     name = nodeid.split("::")[-1].split("[")[0]
     direct = stats_by_name.get(nodeid) or stats_by_name.get(name)

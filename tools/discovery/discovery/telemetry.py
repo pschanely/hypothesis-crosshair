@@ -7,6 +7,7 @@ search, so classification reads tier-A runs exclusively.
 
 import json
 import os
+from dataclasses import dataclass
 from typing import Dict, Iterable, Iterator, List, Optional
 
 from .model import CompletionStats, SearchProgress
@@ -217,3 +218,70 @@ def realization_sites(stats: Dict[str, CompletionStats]) -> Dict[str, int]:
         for site, count in entry.realization_sites.items():
             totals[site] = totals.get(site, 0) + count
     return totals
+
+
+#: Share of solver iterations discarded for nondeterminism before it is worth
+#: reporting as a clue.
+NONDETERMINISM_CLUE_RATE = 0.5
+
+#: Completion text CrossHair emits when it believes it closed the search space.
+EXHAUSTED_COMPLETION = "exhausted all paths"
+
+
+@dataclass
+class Clue:
+    """Something the observability tier noticed, and what would settle it.
+
+    A clue is never a verdict. Observability realizes symbolic draws and
+    perturbs the search, so the run that produced it is not the run being
+    judged; it can say where to look next and nothing more.
+    """
+
+    nodeid: str
+    observation: str
+    follow_up: str
+
+
+def clues_from(
+    stats: Dict[str, CompletionStats],
+    verdicts: Optional[Dict[str, str]] = None,
+) -> List[Clue]:
+    """Read a telemetry tier for leads worth another tier-A run."""
+    verdicts = verdicts or {}
+    found: List[Clue] = []
+    for nodeid, entry in sorted(stats.items()):
+        if not entry.crosshair_cases:
+            continue
+        if nondeterminism_rate(entry) >= NONDETERMINISM_CLUE_RATE:
+            found.append(
+                Clue(
+                    nodeid,
+                    f"{nondeterminism_rate(entry):.0%} of solver iterations were "
+                    "discarded for detected nondeterminism",
+                    "re-run this test alone; CrossHair's determinism check is "
+                    "deep enough that ordinary internal caching trips it",
+                )
+            )
+        if any(EXHAUSTED_COMPLETION in text for text in entry.counts):
+            found.append(
+                Clue(
+                    nodeid,
+                    "CrossHair reported the path space exhausted",
+                    "if the baseline finds a failure here, that is an "
+                    "unsoundness claim worth confirming on a tier-A run",
+                )
+            )
+        if search_is_degraded(entry) and verdicts.get(nodeid) in (
+            "crosshair_false_negative",
+            "no_signal",
+        ):
+            found.append(
+                Clue(
+                    nodeid,
+                    f"{entry.realization_rate:.0%} of solver iterations realized a "
+                    "symbolic value, so the search ran mostly concretely",
+                    "re-run with a larger budget before treating "
+                    f"'{verdicts[nodeid]}' as evidence the solver explored this",
+                )
+            )
+    return found

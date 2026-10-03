@@ -238,3 +238,105 @@ def test_a_run_with_no_fallbacks_reports_none():
     stats = telemetry.aggregate([_crosshair_row("t1", ["SMT chose: x > 0"])])
     assert telemetry.unsupported_constructs(stats) == {}
     assert stats["t1"].fell_back_to_concrete == 0
+
+
+def _stats(**kw):
+    stats = CompletionStats()
+    for key, value in kw.items():
+        setattr(stats, key, value)
+    return stats
+
+
+def test_nondeterminism_becomes_a_clue_not_a_verdict():
+    stats = {
+        "t.py::test_a": _stats(
+            counts={"ignored due to non determinism detected": 9},
+            crosshair_cases=10,
+        )
+    }
+    found = telemetry.clues_from(stats)
+    assert len(found) == 1
+    assert "nondeterminism" in found[0].observation
+    assert found[0].follow_up, "a clue must say what would settle it"
+
+
+def test_an_exhaustion_claim_becomes_a_clue():
+    stats = {
+        "t.py::test_a": _stats(
+            counts={"exhausted all paths - nothing else to do": 2}, crosshair_cases=2
+        )
+    }
+    found = telemetry.clues_from(stats)
+    assert any("exhausted" in c.observation for c in found)
+
+
+def test_a_degraded_search_only_clues_where_it_undercuts_the_verdict():
+    """A pass that CrossHair reached honestly needs no caveat."""
+    stats = {
+        "t.py::test_a": _stats(
+            counts={"completed normally": 10},
+            crosshair_cases=10,
+            realizing_cases=10,
+            realizations=40,
+        )
+    }
+    assert telemetry.clues_from(stats, {"t.py::test_a": "trophy_candidate"}) == []
+    found = telemetry.clues_from(stats, {"t.py::test_a": "crosshair_false_negative"})
+    assert len(found) == 1
+    assert "realized" in found[0].observation
+    assert "larger budget" in found[0].follow_up
+
+
+def test_a_healthy_run_produces_no_clues():
+    stats = {
+        "t.py::test_a": _stats(counts={"completed normally": 10}, crosshair_cases=10)
+    }
+    assert telemetry.clues_from(stats, {"t.py::test_a": "no_signal"}) == []
+
+
+def test_a_tier_with_no_solver_cases_produces_no_clues():
+    """Counts can survive from a run where the solver never produced a case,
+    and a clue read off those describes nothing that happened."""
+    assert telemetry.clues_from({"t.py::test_a": CompletionStats()}) == []
+    stranded = _stats(
+        counts={"exhausted all paths - nothing else to do": 4},
+        crosshair_cases=0,
+    )
+    assert telemetry.clues_from({"t.py::test_a": stranded}) == []
+
+
+def test_the_report_shows_clues_despite_an_observer_effect_entry():
+    """A node id can carry two classifications, and the annotation is not the
+    verdict a clue should be read against."""
+    from discovery.cli import _clue_section
+    from discovery.model import Arm, Classification, Outcome, RunResult, Tier, Verdict
+    from discovery.pipeline import PipelineReport
+
+    nodeid = "t.py::test_a"
+    report = PipelineReport(project_dir="/proj")
+    report.classifications = [
+        Classification(
+            nodeid=nodeid,
+            verdict=Verdict.CROSSHAIR_FALSE_NEGATIVE,
+            baseline=Outcome.FAILED,
+            crosshair=Outcome.PASSED,
+        ),
+        Classification(
+            nodeid=nodeid,
+            verdict=Verdict.OBSERVER_EFFECT,
+            baseline=Outcome.FAILED,
+            crosshair=Outcome.PASSED,
+        ),
+    ]
+    tier_b = RunResult(Arm.CROSSHAIR, Tier.B_TELEMETRY, 0, 1.0)
+    tier_b.telemetry["test_a"] = _stats(
+        counts={"completed normally": 10},
+        crosshair_cases=10,
+        realizing_cases=10,
+        realizations=30,
+    )
+    report.telemetry_run = tier_b
+
+    text = "\n".join(_clue_section(report))
+    assert "never verdicts" in text
+    assert "crosshair_false_negative" in text

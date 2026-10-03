@@ -17,7 +17,7 @@ from . import store as store_mod
 from . import telemetry
 from . import triage as triage_mod
 from .model import Classification, RunResult, SearchProgress, Verdict
-from .pipeline import Pipeline, PipelineConfig, PipelineReport
+from .pipeline import Pipeline, PipelineConfig, PipelineReport, stats_for
 from .runner import EnvSpec, Runner
 from .sandbox import DockerSandbox, Limits, LocalSandbox, Sandbox, docker_available
 from .store import Store, cache_key, classification_from_payload
@@ -25,14 +25,12 @@ from .store import Store, cache_key, classification_from_payload
 _HEADLINE_ORDER = [
     Verdict.TROPHY_CANDIDATE,
     Verdict.CROSSHAIR_FALSE_POSITIVE,
-    Verdict.SOUNDNESS_SUSPECT,
     Verdict.CROSSHAIR_FALSE_NEGATIVE,
     Verdict.CROSSHAIR_CRASH,
     Verdict.CROSSHAIR_TIMEOUT,
     Verdict.OBSERVER_EFFECT,
     Verdict.PENDING_VALIDATION,
     Verdict.SHARED_FIND,
-    Verdict.QUARANTINED_NONDETERMINISTIC,
     Verdict.QUARANTINED_UNSTABLE,
     Verdict.NO_BASELINE_RESULT,
     Verdict.NO_SIGNAL,
@@ -73,6 +71,7 @@ def _format(report: PipelineReport) -> str:
                 first = item.falsifying_example.replace("\n", " ")
                 lines.append(f"        example: {first[:110]}")
         lines.append("")
+    lines.extend(_clue_section(report))
     lines.extend(_cluster_section(report))
     lines.extend(_telemetry_section(report))
     if report.crosshair_run is not None:
@@ -88,6 +87,38 @@ def _format(report: PipelineReport) -> str:
             "reports anything to a third-party project."
         )
     return "\n".join(lines)
+
+
+def _clue_section(report: PipelineReport) -> List[str]:
+    """Leads from the observability tier, each with the run that would settle it.
+
+    These are not verdicts and cannot become one here: the tier that produced
+    them realizes symbolic draws, so it is not the run being judged.
+    """
+    if report.telemetry_run is None:
+        return []
+    # Observability names a test by its Hypothesis property; everything else
+    # here names it by its pytest node id.
+    by_nodeid = {}
+    verdicts = {}
+    for item in report.classifications:
+        # A node id can carry an observer_effect entry alongside its real
+        # verdict, and that entry says nothing about what the solver found.
+        if item.verdict is not Verdict.OBSERVER_EFFECT or item.nodeid not in verdicts:
+            verdicts[item.nodeid] = item.verdict.value
+        stats = stats_for(report.telemetry_run.telemetry, item.nodeid)
+        if stats is not None:
+            by_nodeid[item.nodeid] = stats
+    found = telemetry.clues_from(by_nodeid, verdicts)
+    if not found:
+        return []
+    lines = [f"clues from the observability tier  ({len(found)}, never verdicts)"]
+    for clue in found:
+        lines.append(f"    {clue.nodeid}")
+        lines.append(f"        {clue.observation}")
+        lines.append(f"        -> {clue.follow_up}")
+    lines.append("")
+    return lines
 
 
 #: Node ids listed under a cluster before the rest are summarized.
@@ -417,7 +448,6 @@ _LESS_INFORMATIVE_THAN_NO_SIGNAL = frozenset(
         Verdict.CROSSHAIR_TIMEOUT,
         Verdict.NO_BASELINE_RESULT,
         Verdict.QUARANTINED_UNSTABLE,
-        Verdict.QUARANTINED_NONDETERMINISTIC,
     }
 )
 

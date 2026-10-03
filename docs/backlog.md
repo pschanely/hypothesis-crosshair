@@ -1513,9 +1513,19 @@ unfit, not a way to order the fit. The survey does the ordering.
 **Measured, over the 30 most downloaded clonable packages:** 6 carry
 Hypothesis property tests, found in 54 seconds of cloning. The hit rate, 20%,
 is lower than B33's hand-picked 6 of 15, but it costs 1.8 seconds per
-candidate rather than a judgment call. `idna` (17 property tests, pure
-Unicode and string logic) and `pydantic` (9) are candidates the corpus did not
-have.
+candidate rather than a judgment call.
+
+**Over 150 repositories, through the CLI:** 13 carry property tests and 3
+were refused on size. Seven are candidates the corpus did not have --
+`sympy` (22 property tests), `idna` (17), `pydantic` (9), `hpack` (9),
+`jmespath` (7), `virtualenv` (7), `sentry-sdk` (3) -- against six it already
+had. The hit rate falls from 20% in the top 30 to 8.7% over 150, which is
+what one would expect: the most downloaded packages are the best tested.
+
+That is the bottleneck gone. B33 found 6 candidates from 15 libraries by
+hand; this found 7 new ones from 150 repositories without a judgment call,
+and the limit now is how many can be provisioned rather than how many can be
+found.
 
 **Two bugs found by running it wide, both about cost rather than correctness.**
 

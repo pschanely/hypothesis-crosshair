@@ -7,10 +7,11 @@ import shlex
 import sys
 import time
 import uuid
-from dataclasses import replace
+from dataclasses import asdict, replace
 from typing import Dict, List, Optional
 
 from . import cluster as cluster_mod
+from . import outcomes as outcomes_mod
 from . import provenance
 from . import store as store_mod
 from . import telemetry
@@ -455,11 +456,19 @@ def _retry_no_signal(build, run_root: str, report: PipelineReport, extra: int) -
                 break
 
 
-def _triage(store: Store, run_id: str, report: PipelineReport, args) -> None:
-    """Hand each failure cluster to the configured decider."""
+def _triage(
+    store: Store,
+    run_id: str,
+    report: PipelineReport,
+    args,
+    config: PipelineConfig,
+    commit: str,
+    versions: Dict[str, str],
+) -> Optional[outcomes_mod.Routing]:
+    """Hand each failure cluster to the configured decider, then route it."""
     groups = _clusters_of(report)
     if not groups:
-        return
+        return None
     triage_mod.enqueue_clusters(store, run_id, groups, report.project_dir)
     outcome = triage_mod.run_triage(
         store,
@@ -477,6 +486,85 @@ def _triage(store: Store, run_id: str, report: PipelineReport, args) -> None:
         )
     for key, reason in outcome.rejected.items():
         print(f"    REJECTED {key}: {reason[:140]}", file=sys.stderr)
+    return outcomes_mod.route(
+        groups,
+        outcome.decided,
+        report.classifications,
+        project=report.project_dir,
+        commit=commit,
+        crosshair_version=versions.get("crosshair", ""),
+        baseline_examples=config.baseline_max_examples,
+        baseline_seeds=len(config.baseline_seeds),
+    )
+
+
+def _routing_json(routing: Optional[outcomes_mod.Routing]) -> dict:
+    if routing is None:
+        return {}
+    return {
+        "trophies": [
+            {
+                **asdict(trophy.evidence),
+                "reasoning": trophy.reasoning,
+                "confidence": trophy.confidence,
+                "found_on": trophy.found_on,
+                "why_random_search_misses_it": trophy.why_random_search_misses_it,
+                "human_review_required": True,
+            }
+            for trophy in routing.trophies
+        ],
+        "crosshair_defects": [
+            {
+                **asdict(defect.evidence),
+                "reasoning": defect.reasoning,
+                "confidence": defect.confidence,
+            }
+            for defect in routing.crosshair_defects
+        ],
+        "dismissed": [asdict(d.evidence) for d in routing.dismissed],
+        "needs_human": [asdict(d.evidence) for d in routing.needs_human],
+        "withheld": [asdict(d.evidence) for d in routing.withheld],
+    }
+
+
+def _routing_section(routing: outcomes_mod.Routing) -> List[str]:
+    """Where each triaged cluster went, and why the withheld ones did not."""
+    if routing.total == 0:
+        return []
+    lines = ["routing"]
+    lines.append(f"    trophy drafts:      {len(routing.trophies)}")
+    for trophy in routing.trophies:
+        lines.append(
+            f"        {trophy.evidence.frame or 'unknown frame'} "
+            f"({', '.join(trophy.evidence.nodeids[:3])})"
+        )
+        lines.append(f"            {trophy.why_random_search_misses_it}")
+    lines.append(f"    crosshair defects:  {len(routing.crosshair_defects)}")
+    for defect in routing.crosshair_defects:
+        lines.append(
+            f"        {defect.evidence.frame or 'unknown frame'}: "
+            f"{defect.reasoning[:90]}"
+        )
+    lines.append(f"    dismissed:          {len(routing.dismissed)}")
+    lines.append(f"    needs human:        {len(routing.needs_human)}")
+    if routing.withheld:
+        lines.append(f"    withheld:           {len(routing.withheld)}")
+        lines.append(
+            "        triage called these project bugs, but no test in them is a "
+            "trophy_candidate:"
+        )
+        for held in routing.withheld:
+            lines.append(
+                f"        {held.evidence.frame or 'unknown frame'} "
+                f"[{', '.join(held.evidence.classifier_verdicts) or 'no verdict'}]"
+            )
+    if routing.trophies:
+        lines.append(
+            "    NOTE: trophy drafts are for human review. This tool never "
+            "reports anything to a third-party project."
+        )
+    lines.append("")
+    return lines
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -643,8 +731,9 @@ def main(argv: Optional[List[str]] = None) -> int:
             report = build(run_root).run(args.nodeids or None)
         if args.retry_no_signal > 0:
             _retry_no_signal(build, run_root, report, args.retry_no_signal)
+        routing = None
         if store is not None and args.triage_command:
-            _triage(store, run_id, report, args)
+            routing = _triage(store, run_id, report, args, config, commit, versions)
         if store is not None:
             store.record_verdicts(run_id, report.classifications)
             counts = {
@@ -694,12 +783,15 @@ def main(argv: Optional[List[str]] = None) -> int:
                         }
                         for c in report.classifications
                     ],
+                    "routing": _routing_json(routing),
                 },
                 indent=2,
             )
         )
     else:
         print(_format(report))
+        if routing is not None:
+            print("\n".join(_routing_section(routing)))
     return 0
 
 

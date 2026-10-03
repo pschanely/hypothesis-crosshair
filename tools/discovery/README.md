@@ -66,6 +66,26 @@ The decider lives outside this tool so that a model can answer here without the
 pipeline depending on one. `--triage-budget` bounds how many clusters one
 invocation will decide.
 
+### Where a triaged cluster goes
+
+| triage says | and the classifier says | result |
+| --- | --- | --- |
+| `project_bug` | `trophy_candidate` | a trophy **draft**, for a person to read |
+| `project_bug` | anything else | **withheld**, with the verdicts that blocked it |
+| `crosshair_artifact` | anything | a CrossHair defect record |
+| `overstrong_property` | anything | dismissed |
+| `unclear` | anything | sent to a person |
+
+A trophy needs both: the clean-room replay shows the example failing without
+the plugin, and triage read the code and called it a real bug. Either alone
+has a failure mode the other covers -- triage can misread code, and a replay
+cannot tell a real defect from an over-strong property. In particular
+`pending_validation` means the replay was *inconclusive*, which is not
+evidence, so triage cannot stand in for the replay that did not run.
+
+A trophy draft is a record. This tool never reports anything to a third-party
+project.
+
 ## What it reports
 
 | Verdict | Meaning |
@@ -134,6 +154,7 @@ defect.
 | `classify.py` | Baseline gate and the three-way differential |
 | `cluster.py` | Groups failures by defect: exception, frame, scrubbed message |
 | `triage.py` | Triage queue, the answer schema, and the decider seam |
+| `outcomes.py` | Routes a triaged cluster, and refuses unsupported promotions |
 | `validate.py` | Clean-room replay of a reported example |
 | `pipeline.py` | Stage orchestration |
 | `store.py` | SQLite durable state: work queue, verdicts, version-keyed cache |

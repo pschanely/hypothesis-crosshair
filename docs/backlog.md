@@ -1112,3 +1112,33 @@ suites now fail their tests when introduced.
 Still deterministic work before an agent is useful here: nothing yet carries a
 triaged cluster onward, so `project_bug` does not reach the trophy track and
 `crosshair_artifact` does not reach the CrossHair stream.
+
+## B30. Routing: a trophy needs two things to agree
+
+Triage says what a cluster is; `outcomes.py` says what follows, and refuses
+the promotions that do not follow. A cluster becomes a trophy draft only when
+the classifier says `trophy_candidate` -- the example was replayed with the
+plugin absent and still failed -- *and* triage read the code and called it a
+project bug. Either alone has a failure mode the other covers: triage can
+misread code, and a replay cannot tell a real defect from an over-strong
+property.
+
+`pending_validation` is specifically not enough. It means the replay was
+inconclusive, which is not evidence in either direction, so triage calling
+something a project bug cannot stand in for the replay that did not run.
+Everything triage calls a project bug without that confirmation is **withheld**
+and reported with the verdicts that blocked it, rather than dropped.
+
+**The live run withheld for a reason worth recording.** On the demo project,
+triage called the `IndexError` at `tinylib.py:22` a project bug and it was
+right -- but its verdict is `shared_find`, because random search finds it too.
+It is a real bug and not a CrossHair trophy, and the routing says so:
+`tinylib.py:22 [shared_find]`. The first wording of that line claimed the
+clean-room replay had not confirmed it, which was wrong; the line now prints
+the classifier verdicts and explains itself.
+
+The one trophy draft that did come through carries the column the design asks
+for, quantified from the run rather than asserted: *the baseline found nothing
+in 100 examples across 2 seeds (200 draws)*.
+
+Nothing here reports anything anywhere, and the report says so.

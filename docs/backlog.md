@@ -1029,3 +1029,45 @@ four libraries reach, not what Python code reaches. Widening it is cheap --
 this pass needed no clean room and no validation interpreter, which is roughly
 a quarter of a full three-way run -- and that is the argument for running the
 CrossHair-defect channel at breadth rather than depth.
+
+## B28. Clustering, and three ways a signature leaks the example
+
+Stage 5's agent triages clusters rather than failures, so `cluster.py` is a
+prerequisite for it and is deterministic code, not model work. A failure's
+identity is its exception type, the innermost project frame, and a normalized
+message. Innermost rather than outermost because the outermost frame of a test
+failure is always the test function, which the node id already names.
+
+**Everything that varies per example has to come out of the signature, and
+three separate things leak it.** Each was found by running the thing rather
+than by reading it.
+
+- **The frame pattern matched across newlines.** `[^:]*` includes `\n`, so a
+  "path" could start inside pytest's `E `-prefixed example block and run on
+  until it found a `.py:` further down. The first live run returned a frame of
+  `E           data=b'0\xe8\xe1>',`. Unit tests on hand-written tracebacks all
+  passed, because a hand-written traceback has no example block above the
+  frames.
+- **Hypothesis's `Falsifying example:` block is folded into the same message**
+  as the assertion by pytest, and it is the one part guaranteed to differ
+  between two sightings of one defect.
+- **pytest's assertion introspection spells out the operands.** The `+ where`
+  and `+ and` continuation lines carry the values the example produced, so
+  `assert 7 == 8` and `assert 3 == 4` kept distinct signatures even after
+  numeric literals were normalized away.
+
+With all three removed, the demo project's three planted defects cluster as
+three, and the `IndexError` is attributed to `tinylib.py:22` -- the library --
+rather than to the test that called it.
+
+**Two of the first twelve tests passed for the wrong reason**, and only
+mutation testing said so. The library-frame test put the project frame last,
+so it passed whether or not foreign frames were filtered; the ordering test
+used exception names that sorted into the wanted order anyway, so it passed
+whether or not clusters were sorted by size. A test that cannot fail is worth
+nothing, and neither of these could.
+
+**The plugin's own suite flaked once during this work** -- one failure in a run
+that passed twice immediately after, with nothing in the change touching the
+plugin. Consistent with B23: that suite runs CrossHair, and CrossHair's search
+is not reproducible.

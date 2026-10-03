@@ -10,6 +10,7 @@ import uuid
 from dataclasses import replace
 from typing import Dict, List, Optional
 
+from . import cluster as cluster_mod
 from . import provenance, telemetry
 from .model import Classification, RunResult, SearchProgress, Verdict
 from .pipeline import Pipeline, PipelineConfig, PipelineReport
@@ -68,6 +69,7 @@ def _format(report: PipelineReport) -> str:
                 first = item.falsifying_example.replace("\n", " ")
                 lines.append(f"        example: {first[:110]}")
         lines.append("")
+    lines.extend(_cluster_section(report))
     lines.extend(_telemetry_section(report))
     if report.crosshair_run is not None:
         lines.extend(_search_section(report.crosshair_run.search))
@@ -82,6 +84,35 @@ def _format(report: PipelineReport) -> str:
             "reports anything to a third-party project."
         )
     return "\n".join(lines)
+
+
+#: Node ids listed under a cluster before the rest are summarized.
+_CLUSTER_SAMPLE = 5
+
+
+def _clusters_of(report: PipelineReport) -> List[cluster_mod.Cluster]:
+    details = report.crosshair_run.outcomes if report.crosshair_run else {}
+    return cluster_mod.cluster(report.classifications, details, report.project_dir)
+
+
+def _cluster_section(report: PipelineReport) -> List[str]:
+    """Failures grouped by defect rather than by test.
+
+    One defect reaches many of a project's property tests, so the verdict list
+    above counts tests while this counts bugs.
+    """
+    groups = _clusters_of(report)
+    if not groups:
+        return []
+    lines = [f"failure clusters  ({len(groups)})"]
+    for group in groups:
+        lines.append(f"    [{group.size}] {group.signature.describe()}")
+        for nodeid in group.nodeids[:_CLUSTER_SAMPLE]:
+            lines.append(f"        {nodeid}")
+        if group.size > _CLUSTER_SAMPLE:
+            lines.append(f"        ... and {group.size - _CLUSTER_SAMPLE} more")
+    lines.append("")
+    return lines
 
 
 def _telemetry_section(report: PipelineReport) -> List[str]:
@@ -579,6 +610,16 @@ def main(argv: Optional[List[str]] = None) -> int:
                     "collected": report.collected,
                     "eligible": report.eligible,
                     "observer_effect": report.observer_effect,
+                    "clusters": [
+                        {
+                            "exception_type": group.signature.exception_type,
+                            "frame": group.signature.frame,
+                            "message": group.signature.message,
+                            "nodeids": group.nodeids,
+                            "examples": group.examples,
+                        }
+                        for group in _clusters_of(report)
+                    ],
                     "classifications": [
                         {
                             "nodeid": c.nodeid,

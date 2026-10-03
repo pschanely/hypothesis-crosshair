@@ -1727,3 +1727,40 @@ Open: the recorded node ids are carried but not yet used. They could check
 the survey against what the index saw, which would measure how much a
 year-old index has drifted -- and a test the index recorded that the survey
 cannot find now is a more interesting signal than either on its own.
+
+---
+
+## B42. Two things the first index batch taught, both from failures
+
+Provisioning the three best index candidates gave 1 of 3, and each failure
+was a gap rather than a dud.
+
+**rithm is a Rust extension.** `Cargo.toml`, `build.rs`, a pyo3 cdylib. The
+index cannot see that, and neither could the survey: `transparent_values`
+only looked at what a project *imports*, not at what it *compiles*. The
+survey now reports native build markers -- a root `Cargo.toml`, `build.rs`,
+`meson.build` or `CMakeLists.txt`, a `setup.py` naming `ext_modules` or
+`Extension(`, or any `.pyx`/`.pxd` in the tree -- and scores a project with
+one to zero on a new `pure_python` signal.
+
+The two sources turn out to have complementary blind spots. PyPI sees it in
+the wheel platform tag before a clone; the index cannot see it at all; the
+checkout always can. That makes the survey the backstop, which is where it
+belongs.
+
+Adding a sixth signal pushed the total past the 100 that `describe` claimed,
+so the weights are rebalanced and the denominator now derives from
+`SCORE_WEIGHTS` rather than being written as a literal. A test asserts they
+sum to what is reported, and a mutation changing one weight is caught.
+
+**ebe-python's build fails and its tests never needed it.** It declares
+`name = "ebe"` while its code lives in `lib/`, so poetry cannot build it --
+but the suite starts with `import env`, a path shim, and runs against the
+checkout. A failed project build is therefore not yet a failed provisioning:
+the dependencies, the plugin and pytest are installed without the project,
+and if collection then succeeds the run is recorded as `run-from-checkout`.
+466 tests collected.
+
+Both failures are the same shape as everything else in stage 6 -- the design
+assumed installation succeeds or the project is unusable, and reality has a
+third case. Encoding it took one fallback and three tests.

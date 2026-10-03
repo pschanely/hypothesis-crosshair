@@ -92,12 +92,14 @@ def test_a_failed_environment_stops_before_installing():
     assert len(sandbox.calls) == 1
 
 
-def test_a_failed_install_stops_before_collecting():
-    result, sandbox = run_provision([ok(), fail(stderr="resolution impossible")])
+def test_an_install_that_fails_even_without_the_project_stops_before_collecting():
+    result, sandbox = run_provision(
+        [ok(), fail(stderr="resolution impossible"), fail(stderr="still impossible")]
+    )
     assert not result.ready
     assert "install failed" in result.error
     assert "resolution impossible" in result.error
-    assert len(sandbox.calls) == 2
+    assert len(sandbox.calls) == 3, "one retry without the project, then stop"
 
 
 def test_a_project_that_installs_but_cannot_collect_is_not_provisioned():
@@ -177,3 +179,37 @@ def test_extra_packages_are_installed_with_the_rest():
 def test_describe_reports_a_failure_rather_than_a_count():
     result = Provisioned(project="/a/b", error="install failed: x")
     assert result.describe() == "b: not provisioned -- install failed: x"
+
+
+def test_a_project_whose_build_fails_is_run_against_its_checkout():
+    """Some suites put their own package on the path and never install it."""
+    result, sandbox = run_provision(
+        [ok(), fail(stderr="ModuleOrPackageNotFoundError"), ok(), ok(COLLECTED)]
+    )
+    assert result.ready
+    assert result.repairs == ["run-from-checkout"]
+    assert "-e" in sandbox.calls[1]["argv"], "the first attempt installs the project"
+    retry = sandbox.calls[2]["argv"]
+    assert "/proj" not in retry, "the retry leaves the project out"
+    assert "/plugin" in retry and "pytest" in retry
+
+
+def test_a_checkout_that_still_cannot_collect_reports_the_build_failure():
+    result, _ = run_provision(
+        [
+            ok(),
+            fail(stderr="ModuleOrPackageNotFoundError"),
+            ok(),
+            fail(stdout="E ImportError: no module named ebe"),
+        ]
+    )
+    assert not result.ready
+    assert "collection failed" in result.error
+
+
+def test_both_installs_failing_reports_the_first_error():
+    result, _ = run_provision(
+        [ok(), fail(stderr="build backend exploded"), fail(stderr="network down")]
+    )
+    assert not result.ready
+    assert "build backend exploded" in result.error

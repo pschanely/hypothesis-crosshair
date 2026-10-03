@@ -190,7 +190,7 @@ def test_j(n, tmp_path, capsys):
 """
     result = assess(survey(project(tmp_path, {"tests/test_j.py": source})))
     assert result.runnable, "a low score must never become a rejection"
-    assert result.score < 40
+    assert result.score < 50
     assert result.blocker == ""
 
 
@@ -334,3 +334,50 @@ def test_json_output_carries_the_blocker_and_the_signals(tmp_path, capsys):
     }
     assert rows["good"]["runnable"] and rows["good"]["signals"]["breadth"] > 0
     assert not rows["bare"]["runnable"] and rows["bare"]["blocker"]
+
+
+def test_a_compiled_extension_is_the_strongest_negative(tmp_path):
+    """CrossHair realizes at the boundary however pure the Python around it."""
+    plain = assess(survey(project(tmp_path / "p", {"tests/test_a.py": GIVEN})))
+    rust = project(tmp_path / "r", {"tests/test_a.py": GIVEN})
+    (tmp_path / "r" / "Cargo.toml").write_text("[package]\nname = 'x'\n")
+    compiled = assess(survey(rust))
+    assert compiled.survey.native_markers == ["Cargo.toml"]
+    assert compiled.score < plain.score
+    assert compiled.runnable, "a compiled project is still worth a late slot"
+
+
+def test_a_cython_source_anywhere_counts_as_compiled(tmp_path):
+    root = project(tmp_path, {"tests/test_a.py": GIVEN, "src/pkg/fast.pyx": "x = 1\n"})
+    assert assess(survey(root)).survey.native_markers == [
+        os.path.join("src", "pkg", "fast.pyx")
+    ]
+
+
+def test_a_setup_py_without_an_extension_is_not_compiled(tmp_path):
+    root = project(
+        tmp_path,
+        {
+            "tests/test_a.py": GIVEN,
+            "setup.py": "from setuptools import setup\nsetup()\n",
+        },
+    )
+    assert assess(survey(root)).survey.native_markers == []
+
+
+def test_a_setup_py_building_an_extension_is_compiled(tmp_path):
+    root = project(
+        tmp_path,
+        {
+            "tests/test_a.py": GIVEN,
+            "setup.py": "from setuptools import setup, Extension\n"
+            "setup(ext_modules=[Extension('x', ['x.c'])])\n",
+        },
+    )
+    assert assess(survey(root)).survey.native_markers == ["setup.py"]
+
+
+def test_the_weights_add_up_to_the_score_they_are_reported_against():
+    from discovery.candidates import SCORE_WEIGHTS
+
+    assert sum(SCORE_WEIGHTS.values()) == 100

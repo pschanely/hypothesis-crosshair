@@ -75,6 +75,16 @@ EXTERNAL_RESOURCE_IMPORTS = frozenset(
     }
 )
 
+#: Root files that mean the project compiles an extension, where CrossHair
+#: realizes at the boundary however pure the Python around it is.
+NATIVE_BUILD_FILES = ("Cargo.toml", "build.rs", "meson.build", "CMakeLists.txt")
+
+#: Sources compiled into an extension, wherever they sit in the tree.
+NATIVE_SOURCE_SUFFIXES = (".pyx", ".pxd")
+
+#: What a setup.py says when it builds one.
+_EXTENSION_MARKERS = ("ext_modules", "Extension(")
+
 #: Strategies that draw from a source the solver does not control, so a
 #: failure they produce may not reproduce on replay.
 NONDETERMINISTIC_STRATEGIES = frozenset({"randoms"})
@@ -110,6 +120,32 @@ def python_files(project_dir: str) -> List[str]:
             if name.endswith(".py"):
                 full = os.path.join(root, name)
                 found.append(os.path.relpath(full, project_dir))
+    return found
+
+
+def native_build_markers(project_dir: str) -> List[str]:
+    """Signs that the project compiles an extension, as paths or filenames."""
+    found = []
+    for name in NATIVE_BUILD_FILES:
+        if os.path.exists(os.path.join(project_dir, name)):
+            found.append(name)
+    setup = os.path.join(project_dir, "setup.py")
+    if os.path.exists(setup):
+        try:
+            with open(setup, encoding="utf-8", errors="replace") as handle:
+                text = handle.read()
+            if any(marker in text for marker in _EXTENSION_MARKERS):
+                found.append("setup.py")
+        except OSError:
+            pass
+    for root, dirs, names in os.walk(project_dir):
+        dirs[:] = [
+            d for d in sorted(dirs) if d not in SKIP_DIRS and not d.startswith(".venv")
+        ]
+        for name in sorted(names):
+            if name.endswith(NATIVE_SOURCE_SUFFIXES):
+                found.append(os.path.relpath(os.path.join(root, name), project_dir))
+                return found
     return found
 
 
@@ -269,6 +305,8 @@ class Survey:
     unparsed: Dict[str, str] = field(default_factory=dict)
     #: Property-test markers counted textually in files that would not parse.
     unreadable_markers: Dict[str, int] = field(default_factory=dict)
+    #: Signs that the project compiles an extension.
+    native_markers: List[str] = field(default_factory=list)
 
     @property
     def hidden_tests(self) -> int:
@@ -329,6 +367,7 @@ def survey(project_dir: str) -> Survey:
                 found.unreadable_markers[relative] = markers
         except OSError as exc:
             found.unparsed[relative] = f"{type(exc).__name__}: {exc}"
+    found.native_markers = native_build_markers(project_dir)
     return found
 
 
@@ -342,11 +381,12 @@ DOMAIN_SATURATION = 5
 #: a stated preference about where CrossHair pays off, not a measurement of
 #: where it did. Revise them against what the corpus actually yields.
 SCORE_WEIGHTS = {
-    "breadth": 30,
-    "transparent_values": 25,
-    "no_external_resources": 20,
-    "no_fixtures": 15,
-    "domain_strategies": 10,
+    "breadth": 25,
+    "pure_python": 25,
+    "transparent_values": 20,
+    "no_external_resources": 15,
+    "no_fixtures": 10,
+    "domain_strategies": 5,
 }
 
 
@@ -392,7 +432,10 @@ class Assessment:
         name = os.path.basename(os.path.normpath(self.survey.project))
         if not self.runnable:
             return [f"{name}: not runnable -- {self.blocker}"]
-        lines = [f"{name}: score {self.score}/100, {self.units} property tests"]
+        lines = [
+            f"{name}: score {self.score}/{sum(SCORE_WEIGHTS.values())}, "
+            f"{self.units} property tests"
+        ]
         for signal in sorted(self.signals, key=lambda s: -s.points):
             lines.append(f"    {signal.name:<22} {signal.points:5.1f}  {signal.detail}")
         for note in self.notes:
@@ -466,6 +509,15 @@ def assess(found: Survey) -> Assessment:
             "no_fixtures",
             len(fixtureless) / len(tests) if tests else 1.0,
             _touching_detail(len(tests) - len(fixtureless), "take pytest fixtures"),
+        ),
+        Signal(
+            "pure_python",
+            0.0 if found.native_markers else 1.0,
+            _touching_detail(
+                len(found.native_markers), "sign(s) of a compiled extension"
+            )
+            if found.native_markers
+            else "none",
         ),
         Signal(
             "domain_strategies",

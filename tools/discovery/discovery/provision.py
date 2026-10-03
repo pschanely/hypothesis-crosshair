@@ -28,6 +28,10 @@ INSTALL_ARGV = ("uv", "pip", "install", "--quiet", "--python")
 #: Always needed, whatever the project asks for.
 BASE_PACKAGES = ("pytest", "hypothesis")
 
+#: Recorded when the project's own build fails and its tests are run against
+#: the checkout instead. Some suites are written for that and never install.
+RUN_FROM_CHECKOUT = "run-from-checkout"
+
 INSTALL_LIMITS = Limits(wall_seconds=1800)
 COLLECT_LIMITS = Limits(wall_seconds=600)
 
@@ -130,16 +134,20 @@ def provision(
         result.error = f"could not create a virtual environment: {made.stderr[-300:]}"
         return result
 
+    everything = [*BASE_PACKAGES, "-e", plugin_dir, *extra_packages]
     installed, detail = _install(
-        sandbox,
-        result.python,
-        ["-e", project_dir, *BASE_PACKAGES, "-e", plugin_dir, *extra_packages],
-        project_dir,
-        {},
+        sandbox, result.python, ["-e", project_dir, *everything], project_dir, {}
     )
     if not installed:
-        result.error = f"install failed: {detail.strip()[-300:]}"
-        return result
+        # A suite that puts its own package on the path works without being
+        # installed, so a failed build is not yet a failed provisioning.
+        without_project, retry_detail = _install(
+            sandbox, result.python, everything, project_dir, {}
+        )
+        if not without_project:
+            result.error = f"install failed: {detail.strip()[-300:]}"
+            return result
+        result.repairs.append(RUN_FROM_CHECKOUT)
 
     while True:
         ok, text, count = _collect(

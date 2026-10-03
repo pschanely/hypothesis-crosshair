@@ -1616,3 +1616,33 @@ surfaces as a plain `IndexError` in someone else's library, with nothing to
 suggest the backend produced an impossible value -- a trophy-manufacturing
 machine. The clean-room replay did not reproduce it without the plugin, so the
 verdict was `pending_validation` and not `trophy_candidate`.
+
+---
+
+## B39. Fixing the replay bounds check
+
+The defect B38 found is fixed. `_replayed_draw` now takes the constraints the
+draw asked for and discards the test case when the popped value does not
+answer them, which is the handling already in place for a replay whose types
+no longer line up.
+
+All four constrained draws pass theirs: integer bounds, float range plus nan
+and smallest-nonzero-magnitude, string alphabet and length, bytes length.
+`draw_boolean` has no constraint to check.
+
+**The fix cannot break a working replay.** `doublecheck_inputs` holds the
+realized results of draws the symbolic run already constrained, so a value
+that answered its draw then still answers it now. Only a misaligned replay --
+where the value belongs to a different draw -- can fail the check, and that
+case was already meant to be discarded.
+
+Measured: the reproduction goes from failing on 3 of 3 seeds to passing on 3
+of 3, and the pipeline's verdict for pydantic's `test_datetime_datetime` goes
+from `pending_validation` to `no_signal` on 3 of 3 runs. Eleven regression
+tests were added; seven of them fail with the check removed.
+
+Worth noting what this does *not* do. It converts a corrupted test case into
+a discarded one, which is right, but a replay that desynchronizes is still
+desynchronizing. If discards become common on a project, the cause is the
+draw sequence shifting under realization rather than the check being too
+strict, and that is the thing to measure next.

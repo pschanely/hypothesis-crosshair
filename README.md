@@ -56,6 +56,11 @@ pytest . --hypothesis-profile=crosshair
 ## Changelog
 
 ### Next Version
+* Discard a test case when a replayed value does not answer the draw asking
+  for it. During concrete double-check replay, a value was accepted on its
+  type alone, so a replay whose draws had shifted could hand an out-of-bounds
+  value to a strategy. It then surfaced as an error inside the strategy or the
+  code under test, with nothing to indicate it came from the backend.
 * Report more of the debug log through observability. `observe_test_case` now
   also reports the construct behind a fallback to concrete matching, and the
   code that forced a value to be realized. A fallback was previously invisible:

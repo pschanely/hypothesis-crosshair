@@ -1,7 +1,7 @@
 # CrossHair findings, ready to file
 
-Findings 1-4 are in CrossHair; finding 5 is in this repository's own
-provider and was found by running the discovery pipeline over pydantic.
+Findings 1-4 are in CrossHair and are unfiled. Finding 5 was in this
+repository's own provider and is **fixed**; it is kept here for the record.
 
 Three findings in `crosshair/libimpl/relib.py`, all confirmed present on
 `main` at `ad4a8d0` (0.0.110) and reproduced against the installed 0.0.109.
@@ -183,7 +183,7 @@ for internal errors will score this as a finding about the code under test.
 
 ## 5. `_replayed_draw` checks a value's type but not the bounds it was asked for
 
-This one is in **this repository**, not CrossHair:
+**Fixed.** This one was in **this repository**, not CrossHair:
 `hypothesis_crosshair_provider/crosshair_provider.py`.
 
 **What happens.** On concrete double-check replay, every `draw_*` returns
@@ -243,13 +243,20 @@ Our own run classified it `pending_validation` rather than
 reproduce it. That is the three-way differential doing exactly the job it was
 built for.
 
-**Suggested fix.** Validate the popped value against the request, not just its
-type, and raise `BackendCannotProceed("discard_test_case")` on a mismatch --
-the handling already in place for a desynchronized replay. That converts
-silent corruption into a discarded test case.
+**The fix.** `_replayed_draw` now takes the draw's own constraints and raises
+`BackendCannotProceed("discard_test_case")` when the popped value does not
+answer the request -- the handling already in place for a desynchronized
+replay, so silent corruption becomes a discarded test case. All four
+constrained draws pass their constraints: integer bounds, float range, nan
+and smallest-nonzero-magnitude, string alphabet and length, bytes length.
 
-Also worth considering: a mismatch means the replay queue is misaligned, so
-every later draw in that replay is suspect too.
+A correctly aligned replay cannot be affected, because the values in
+`doublecheck_inputs` are the realized results of draws the symbolic run had
+already constrained.
+
+The repro above goes from failing on 3 of 3 seeds to passing on 3 of 3, and
+the pipeline's verdict for the pydantic test goes from `pending_validation`
+to `no_signal` on 3 of 3 runs.
 
 ---
 

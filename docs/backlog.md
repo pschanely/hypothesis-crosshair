@@ -1650,3 +1650,40 @@ a discarded one, which is right, but a replay that desynchronizes is still
 desynchronizing. If discards become common on a project, the cause is the
 draw sequence shifting under realization rather than the check being too
 strict, and that is the thing to measure next.
+
+---
+
+## B40. The provisioner, and the hole in the middle of the chain
+
+`harness.plan` existed but nothing applied a repair: the CLI printed one and
+exited 3, and the loop that actually installs, retries and records had been a
+scratchpad script since the corpus was first built. `probe_cli` ended at
+"worth provisioning" and `discovery.cli` started at "already provisioned",
+with nothing joining them.
+
+`provision.py` is that join. It builds a virtual environment, installs the
+project, pytest, hypothesis and the plugin, then collects -- and on a
+collection failure asks `harness.plan` for a repair, applies it, and collects
+again until it succeeds, runs out of known repairs, or hits `MAX_REPAIRS`.
+
+**Collection is the proof, not installation.** A project that installs but
+cannot collect is not provisioned. Reporting it as ready means every later
+test comes back `no_baseline_result`, which reads as a property of the test
+rather than of the harness -- exactly the confusion virtualenv and pydantic
+produced before the repairs existed.
+
+**The safety properties are asserted, not reviewed.** Provisioning is the only
+stage allowed the network, and the only one that runs code the project ships
+before a test is selected, since installing an sdist executes its build.
+Tests check the per-command network flag directly: creating the environment
+and installing may reach out, collection may not. A mutation that lets
+collection use the network is caught.
+
+**Proven on the project it was blocked on.** sentry-sdk had never run. The
+provisioner installed pytest-cov for the flags its `addopts` carries, then
+skipped the two integration modules that cannot be imported without extras,
+and collected 2153 tests -- two repairs, no hand-holding. The pipeline then
+ran its one surviving Hypothesis test to `no_signal`.
+
+The repair record travels with the result: `pytest_args` and `env` are what a
+later run has to carry, and the named repairs say what the project needed.

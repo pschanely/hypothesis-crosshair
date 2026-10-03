@@ -190,6 +190,12 @@ one metadata signal that measures something real is the wheel platform tag: a
 package publishing only `-any.whl` has no C extension for CrossHair to realize
 at.
 
+**Provisioning is the only stage that may reach the network.** It is also the
+only one that runs code the project ships before a test is selected, because
+installing an sdist executes its build. Confining both to `provision.py` is
+what lets collection and every run stay offline, and the tests assert the
+per-command network flag rather than leaving it to review.
+
 **A harness repair may change the environment, never the suite.** `Repair`
 can name packages, environment variables and pytest arguments, and has no
 field that can name a file, so a repair that edits a test is unrepresentable
@@ -206,6 +212,7 @@ defect.
 
 | Module | Role |
 | --- | --- |
+| `provision.py` | Builds an environment per project, repairing the harness as needed |
 | `pypi.py` | Ranks package names from PyPI metadata, before anything is cloned |
 | `probe.py` | Shallow-clones a candidate, surveys it, and deletes the checkout |
 | `candidates.py` | Static survey of a checkout: what it would run, and how promising |

@@ -181,6 +181,15 @@ and its conftest files, so runs pass `--confcutdir`, and a project with no
 config of its own also gets an empty `-c`. Without this a project inherits
 collection hooks from whatever happens to sit above it on disk.
 
+**Candidate discovery clones rather than guesses.** PyPI metadata cannot say
+whether a project has Hypothesis tests, because Hypothesis is a development
+dependency and only runtime dependencies are published. A shallow clone plus
+an AST survey answers it exactly in about a second, so the prefilter's only
+job is to drop packages with nowhere to clone from and to rank the rest. The
+one metadata signal that measures something real is the wheel platform tag: a
+package publishing only `-any.whl` has no C extension for CrossHair to realize
+at.
+
 **A harness repair may change the environment, never the suite.** `Repair`
 can name packages, environment variables and pytest arguments, and has no
 field that can name a file, so a repair that edits a test is unrepresentable
@@ -197,6 +206,8 @@ defect.
 
 | Module | Role |
 | --- | --- |
+| `pypi.py` | Ranks package names from PyPI metadata, before anything is cloned |
+| `probe.py` | Shallow-clones a candidate, surveys it, and deletes the checkout |
 | `candidates.py` | Static survey of a checkout: what it would run, and how promising |
 | `harness.py` | Diagnoses a suite that will not start, and the repairs allowed for it |
 | `sandbox.py` | Docker and local execution backends, resource ceilings |

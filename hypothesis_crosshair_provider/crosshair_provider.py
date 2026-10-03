@@ -48,7 +48,77 @@ from hypothesis.internal.observability import observability_enabled
 
 _T = TypeVar("_T")
 
-_IMPORTANT_LOG_RE = re.compile(".*((?:SMT realized symbolic.*)|(?:SMT chose.*))$")
+_IMPORTANT_LOG_RE = re.compile(
+    ".*((?:SMT realized symbolic.*)|(?:SMT chose.*)|(?:Realized at.*))$"
+)
+
+#: Debug records worth reporting whole rather than line by line.
+#:
+#: A record's interesting part is not always on its first line. CrossHair logs
+#: an unsupported regex as the marker, then the pattern, then the construct it
+#: could not handle, so a VERBOSE pattern puts the construct forty lines below
+#: the marker.
+_MULTILINE_LOG_MARKERS = ("Unsupported symbolic regex",)
+
+_LOG_RECORD_START_RE = re.compile(r"^[\d.]+\|")
+
+_FRAME_RE = re.compile(r"\([^()]+ ([^()]+):\d+\)")
+
+#: Modules that realize a value on behalf of a caller rather than causing it.
+#:
+#: The innermost frames of a realization stack are always these, so reporting
+#: them names the mechanism instead of the code that triggered it.
+_PLUMBING_MODULES = frozenset(
+    {"statespace.py", "builtinslib.py", "core.py", "copyext.py", "copy.py"}
+)
+
+_MESSAGE_LIMIT = 240
+
+
+def _log_body(line: str) -> str:
+    line = _LOG_RECORD_START_RE.sub("", line)
+    line = re.sub(r"^[ |]*", "", line)
+    return re.sub(r"^\w+\(\) ", "", line)
+
+
+def _summarize_log_record(record: List[str]) -> Optional[str]:
+    """Compact one debug record into a single reportable message."""
+    body = _log_body(record[0])
+    for marker in _MULTILINE_LOG_MARKERS:
+        if body.startswith(marker):
+            tail = next((line.strip() for line in reversed(record) if line.strip()), "")
+            return f"{marker}: {tail[-_MESSAGE_LIMIT:]}"
+    match = _IMPORTANT_LOG_RE.match(record[0])
+    if not match:
+        return None
+    message = match.group(1)
+    if message.startswith("Realized at"):
+        frames = [
+            match.group(0)
+            for match in _FRAME_RE.finditer(message)
+            if os.path.basename(match.group(1)) not in _PLUMBING_MODULES
+        ]
+        if not frames:
+            return None
+        return "Realized at " + " ".join(frames[-2:])
+    return message[:_MESSAGE_LIMIT]
+
+
+def summarize_debug_log(text: str) -> List[str]:
+    """Reportable messages from a debug buffer.
+
+    Only a small share of the buffer is reportable: the raw log runs to roughly
+    9KB per iteration, nearly all of it SMT constraint dumps and realization
+    stacks.
+    """
+    records: List[List[str]] = []
+    for line in text.split("\n"):
+        if _LOG_RECORD_START_RE.match(line) or not records:
+            records.append([line])
+        else:
+            records[-1].append(line)
+    summaries = (_summarize_log_record(record) for record in records)
+    return [message for message in summaries if message]
 
 
 def is_negative(x):
@@ -587,13 +657,9 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
         and will be included as `observation["metadata"]["backend"]`.
         """
         if getattr(self, "debug_buffer", None):
-            lines = self.debug_buffer.getvalue().split("\n")
-            messages = [
-                match.group(1) for match in map(_IMPORTANT_LOG_RE.match, lines) if match
-            ]
             return {
                 "completion": self.completion,
-                "messages": messages,
+                "messages": summarize_debug_log(self.debug_buffer.getvalue()),
             }
         return {}
 

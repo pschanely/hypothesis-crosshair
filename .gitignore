@@ -161,3 +161,6 @@ cython_debug/
 
 # hypothesis-crosshair specific:
 example*.py
+
+# discovery pipeline run artifacts
+.discovery/

@@ -181,6 +181,13 @@ and its conftest files, so runs pass `--confcutdir`, and a project with no
 config of its own also gets an empty `-c`. Without this a project inherits
 collection hooks from whatever happens to sit above it on disk.
 
+**A harness repair may change the environment, never the suite.** `Repair`
+can name packages, environment variables and pytest arguments, and has no
+field that can name a file, so a repair that edits a test is unrepresentable
+rather than merely discouraged. Diagnosis happens in the pipeline; applying a
+repair needs the network and so belongs to the install phase outside it. An
+unrecognized failure yields no repair and exits 2.
+
 **Nondeterminism means skip, not bug.** CrossHair's determinism check is deep:
 an internal memoization cache that never changes observable behavior is enough
 to trip it. A high rate quarantines the test; it is not counted as a CrossHair
@@ -191,6 +198,7 @@ defect.
 | Module | Role |
 | --- | --- |
 | `candidates.py` | Static survey of a checkout: what it would run, and how promising |
+| `harness.py` | Diagnoses a suite that will not start, and the repairs allowed for it |
 | `sandbox.py` | Docker and local execution backends, resource ceilings |
 | `_injected_plugin.py` | Runs inside the target env: forces settings, reports outcomes |
 | `runner.py` | One pytest invocation for a given arm and tier |

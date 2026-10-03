@@ -1415,3 +1415,66 @@ score a rejection.
 Open: `st.randoms()` is reported as a note rather than scored, because one
 instance in the corpus (bidict) is not enough to weight. Strategy-level fit
 generally needs measuring against outcomes before it earns a number.
+
+---
+
+## B36. Harness repair, and a flaw in every mutation suite
+
+The second half of stage 6. B33 measured harness repair as rarer than the
+design assumed -- 3 of 10 provisioned projects, 0 of the 6 newest -- so this
+is built from the three failures actually recorded rather than from imagined
+ones.
+
+**A repair may change the environment. It may never change the suite.** A
+"repair" that edited a test could turn a failing assertion into a passing one,
+or a passing one into a finding, and the run would then manufacture results
+rather than discover them. `Repair` can express packages, environment
+variables and pytest arguments. It has no field that can name a file, so the
+dangerous repair is unrepresentable rather than merely forbidden -- the same
+move as the sandbox holding no credentials. A test asserts the field set
+directly, and a mutation that adds a `patch_file` field is caught.
+
+**The real failures were more uniform than expected.** Both plugin cases --
+cattrs needing pytest-benchmark, bidict needing pytest-xdist -- surface the
+same way, because the project's own `addopts` names flags the plugin supplies
+and pytest refuses to start:
+
+    python -m pytest: error: unrecognized arguments: --benchmark-sort=fullname
+    --benchmark-warmup=true --benchmark-warmup-iterations=5
+
+So the diagnosis is a flag-prefix table, and the flag is in the error text
+itself. A project writing `addopts` with spaces rather than `=` makes argparse
+echo the flag's *value* as a separate token, which is why only tokens starting
+with `-` are reported as flags.
+
+**xdist is installed and then stopped from working.** It moves tests into
+subprocesses the injected plugin never reaches, so a suite configured for it
+gets `-n0`. This was applied by hand during provisioning and had never reached
+the pipeline, which means any project whose `addopts` carried `-n auto` would
+have run the injected plugin under xdist -- the thing that broke bidict.
+
+**Diagnosis is in the pipeline; applying is not.** Installing a package needs
+the network, and the safety model allows network only during the install
+phase, never during collection. So a repairable collection failure prints the
+repair and exits 3, an unrecognized one exits 2 and asks for a person, and the
+orchestrator outside applies and re-runs. Verified live against hyperlink on
+both paths.
+
+**The shallow-clone version bug is real but not a repair.** A clone with no
+tags makes setuptools_scm report `0.1.dev1` instead of `25.4.0`. It did not
+break the install on retry, so it is not encoded as a repair; it matters
+because a trophy report naming `attrs 0.1.dev1` would be wrong. Provenance is
+keyed on the commit rather than the version, so nothing cached is poisoned.
+
+**A flaw in all nine mutation suites, found by tripping over it.** The suites
+copy the target aside, mutate, run, and restore. When a mutated line happens
+to have the same length as the original, the restored file can match the size
+and mtime recorded in `__pycache__`, and Python reuses a `.pyc` compiled from
+the *mutated* source. A real test failure appeared against clean source, which
+is how it surfaced. Every suite now clears bytecode before each mutation and
+runs with `PYTHONDONTWRITEBYTECODE`.
+
+This is worth stating plainly: until this was fixed, any suite's result could
+have been scored against the wrong source, in either direction. All nine were
+re-run from scratch afterwards and all report every mutation caught, which is
+the first time that claim has been trustworthy.

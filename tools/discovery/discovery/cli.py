@@ -11,6 +11,7 @@ from dataclasses import asdict, replace
 from typing import Dict, List, Optional
 
 from . import cluster as cluster_mod
+from . import harness
 from . import outcomes as outcomes_mod
 from . import provenance
 from . import store as store_mod
@@ -18,7 +19,7 @@ from . import telemetry
 from . import triage as triage_mod
 from .model import Classification, RunResult, SearchProgress, Verdict
 from .pipeline import Pipeline, PipelineConfig, PipelineReport, stats_for
-from .runner import EnvSpec, Runner
+from .runner import CollectionFailed, EnvSpec, Runner
 from .sandbox import DockerSandbox, Limits, LocalSandbox, Sandbox, docker_available
 from .store import Store, cache_key, classification_from_payload
 
@@ -780,6 +781,29 @@ def main(argv: Optional[List[str]] = None) -> int:
                 file=sys.stderr,
                 flush=True,
             )
+    except CollectionFailed as exc:
+        repair = harness.plan(str(exc))
+        print(f"collection failed: {str(exc)[:400]}", file=sys.stderr)
+        if repair is None:
+            print(
+                "no known repair for this failure; it needs a person",
+                file=sys.stderr,
+            )
+            return 2
+        print(f"\nthe harness needs a repair -- {repair.describe()}", file=sys.stderr)
+        print(f"  because {repair.rationale}", file=sys.stderr)
+        if repair.packages:
+            print(
+                f"  install into the project environment, then re-run: "
+                f"{' '.join(repair.packages)}",
+                file=sys.stderr,
+            )
+        if repair.pytest_args:
+            print(
+                f"  and pass --pytest-arg {' --pytest-arg '.join(repair.pytest_args)}",
+                file=sys.stderr,
+            )
+        return 3
     finally:
         if store is not None:
             store.close()

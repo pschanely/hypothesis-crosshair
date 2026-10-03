@@ -1,5 +1,8 @@
 # CrossHair findings, ready to file
 
+Findings 1-4 are in CrossHair; finding 5 is in this repository's own
+provider and was found by running the discovery pipeline over pydantic.
+
 Three findings in `crosshair/libimpl/relib.py`, all confirmed present on
 `main` at `ad4a8d0` (0.0.110) and reproduced against the installed 0.0.109.
 
@@ -175,6 +178,78 @@ one process.
 The error surfaces as an ordinary pytest failure rather than on stderr, which
 is worth noting for anyone building tooling on top: a harness watching stderr
 for internal errors will score this as a finding about the code under test.
+
+---
+
+## 5. `_replayed_draw` checks a value's type but not the bounds it was asked for
+
+This one is in **this repository**, not CrossHair:
+`hypothesis_crosshair_provider/crosshair_provider.py`.
+
+**What happens.** On concrete double-check replay, every `draw_*` returns
+early through `_replayed_draw`, which pops the next recorded value and
+accepts it if `isinstance(value, expected_type)`. The `min_value` and
+`max_value` the caller asked for are never applied, because the bounds check
+in `draw_integer` sits after that early return. The same holds for
+`draw_float`, `draw_string` and `draw_bytes` and their own constraints.
+
+A replay can desynchronize, because realizing a value changes which branches
+a strategy takes and therefore how many draws it makes. When it does, a value
+recorded for one draw is handed to a different draw. The existing guard
+catches that only when the types differ.
+
+**Repro.** Needs a C extension in the test body: realizing at that boundary
+is what shifts the draw sequence. Pure-Python realization did not trigger it.
+
+```python
+from hypothesis import given, settings
+from hypothesis import strategies as st
+from pydantic_core import SchemaValidator
+from pydantic_core import core_schema as cs
+
+SCHEMA = SchemaValidator(cs.datetime_schema())
+
+@settings(backend="crosshair", max_examples=50, deadline=None, database=None)
+@given(st.datetimes())
+def test_realizing_body(value):
+    assert SCHEMA.validate_python(value) == value
+```
+
+```
+IndexError: tuple index out of range
+while generating 'value' from datetimes()
+hypothesis/strategies/_internal/datetime.py:533
+```
+
+**The actual cause**, recorded by wrapping `ConjectureData.draw_integer` and
+realizing only inside the `except`:
+
+```
+LAST DRAW: draw_integer(0, 30, {'shrink_towards': 24}) returned 9999
+```
+
+`st.datetimes()` asked for an index into a 31-element tuple and got 9999,
+which is `datetime.MAXYEAR` -- a value recorded for a *year* draw. It is an
+`int`, so the type guard passed.
+
+**Why it matters more than the crash.** The exception surfaces inside the
+strategy or the project, with no sign that the backend produced an impossible
+value. A pipeline looking for bugs in third-party code sees a plain
+`IndexError` in someone else's library. It is a trophy-manufacturing machine:
+left unchecked it generates bug reports about correct code.
+
+Our own run classified it `pending_validation` rather than
+`trophy_candidate`, because the clean-room replay without the plugin did not
+reproduce it. That is the three-way differential doing exactly the job it was
+built for.
+
+**Suggested fix.** Validate the popped value against the request, not just its
+type, and raise `BackendCannotProceed("discard_test_case")` on a mismatch --
+the handling already in place for a desynchronized replay. That converts
+silent corruption into a discarded test case.
+
+Also worth considering: a mismatch means the replay queue is misaligned, so
+every later draw in that replay is suspect too.
 
 ---
 

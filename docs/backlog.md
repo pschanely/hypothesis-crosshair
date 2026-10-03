@@ -1550,3 +1550,69 @@ Open: the prefilter cannot see repository size before cloning, so the budget
 is enforced after the download rather than before it. GitHub's API would say,
 but that means a call per candidate against repositories outside this
 project.
+
+---
+
+## B38. Running the seven new candidates
+
+Provisioned and swept the candidates B37 found. The sweep ran without the
+telemetry tier, since B34 established it cannot decide a verdict and it
+roughly doubles the cost, at a 120s CrossHair budget rather than the 900s
+default.
+
+| project | result |
+| --- | --- |
+| jmespath | 7 no_signal |
+| hpack | 9 no_signal |
+| virtualenv | 7 no_signal, after a repair |
+| idna | 10 crosshair_timeout, 7 no_signal |
+| pydantic | 1 pending_validation, 8 no_signal |
+| sympy | 2 of 22, too slow to finish here |
+| sentry-sdk | not run; needs the skip-unimportable repair |
+
+**Provisioning found three repair classes, all now encoded (B36).** virtualenv
+sets `addopts = -m 'not property'`, so its own configuration deselects every
+property test and the baseline reported `not_run` for all seven; `-m ""`
+overrides it and they then run. pydantic's strict marker configuration aborts
+on `thread_unsafe`, registered by pytest-run-parallel. sentry-sdk's optional
+integration modules cannot be imported without extras.
+
+**A gap the repairs do not cover.** pydantic collected cleanly and then
+errored on every test, because its conftest imports `jsonschema` inside a
+fixture body. Diagnosis reads collection output, so it never saw it. A run
+where every test comes back `no_baseline_result` should feed the baseline
+arm's output to `harness.diagnose`, which it currently does not.
+
+**idna's timeouts were mostly the budget.** Re-running two of them at the
+900s default split: `test_encode` became `no_signal`, `test_decode` still
+timed out. So one is an artifact of the short sweep and one is a real wall at
+the full budget. A sweep budget buys breadth and costs exactly this kind of
+certainty, which is worth stating whenever a sweep's `crosshair_timeout`
+count is quoted.
+
+**pydantic produced a defect in our own provider -- finding 5.** The
+`pending_validation` test fails with `IndexError` inside Hypothesis's
+`datetimes()` strategy. `draw_integer(0, 30, shrink_towards=24)` returned
+9999, which is `datetime.MAXYEAR`: a value recorded for a *year* draw handed
+to an *index* draw during concrete double-check replay. `_replayed_draw`
+accepts a popped value on `isinstance(value, expected_type)` alone, so the
+bounds are never applied -- the check in `draw_integer` sits after that early
+return, and the same holds for float, string and bytes.
+
+Two things about it are worth keeping.
+
+It only reproduces when the test body realizes the value **at a C boundary**.
+`repr()` and `.isoformat()` do not trigger it; `pydantic_core.validate_python`
+does. Realizing changes which branches a strategy takes, so the replay's draw
+sequence no longer lines up with the recording.
+
+And instrumenting it makes it disappear. Wrapping `draw_integer` to realize
+and bounds-check every result turned a 3-of-3 failure into a pass, which is
+the B34 observation problem in a new place: the fix had to record symbolically
+and realize only inside the `except`.
+
+**The differential caught it, which is the point.** An out-of-bounds draw
+surfaces as a plain `IndexError` in someone else's library, with nothing to
+suggest the backend produced an impossible value -- a trophy-manufacturing
+machine. The clean-room replay did not reproduce it without the plugin, so the
+verdict was `pending_validation` and not `trophy_candidate`.

@@ -163,6 +163,40 @@ def test_needs_validation_only_when_crosshair_is_alone_in_failing():
     assert not needs_validation(Outcome.PASSED, Outcome.PASSED)
 
 
+def test_a_single_errored_baseline_is_not_called_unstable():
+    """One seed cannot differ from itself.
+
+    natsort's locale-dependent tests error in baseline setup, and a run with
+    a single seed reported "baseline outcomes differed across seeds: error",
+    which is not a thing that happened.
+    """
+    verdict = classify(
+        NODE, baseline=gate(Outcome.ERROR), crosshair_run=run(Outcome.PASSED)
+    )
+    assert verdict.verdict is Verdict.NO_BASELINE_RESULT
+    assert "differed" not in verdict.rationale
+    assert "error" in verdict.rationale
+
+
+def test_a_baseline_that_only_errors_produced_no_result():
+    assert gate(Outcome.ERROR, Outcome.ERROR).stability is Stability.NO_RESULT
+
+
+def test_a_seed_that_errored_does_not_make_the_rest_unstable():
+    """An error is the harness failing, not the test disagreeing with itself."""
+    assert gate(Outcome.PASSED, Outcome.ERROR).stability is Stability.STABLE_PASS
+    assert gate(Outcome.FAILED, Outcome.ERROR).stability is Stability.STABLE_FAIL
+    assert gate(Outcome.PASSED, Outcome.SKIPPED).stability is Stability.STABLE_PASS
+
+
+def test_genuine_disagreement_is_still_unstable():
+    assert gate(Outcome.PASSED, Outcome.FAILED).stability is Stability.UNSTABLE
+    assert (
+        gate(Outcome.PASSED, Outcome.FAILED, Outcome.ERROR).stability
+        is Stability.UNSTABLE
+    )
+
+
 def test_a_test_that_never_ran_is_not_called_unstable():
     verdict = classify(
         NODE,

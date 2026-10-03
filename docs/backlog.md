@@ -1215,3 +1215,73 @@ accident.** The first scoring run happened to work because the decider's cwd
 sat above the fixture. `load_cases` now resolves a relative project path
 against the repository, and a case naming a checkout that is not here stays
 unresolved, so a decider visibly gets only the cluster.
+
+## B33. Scaling the corpus to ten projects, and a third classifier bug
+
+The corpus went from 4 projects to 10 -- `hyperlink`, `srt`, `natsort`, `h2`,
+`priority` and `pyrsistent` join `packaging`, `attrs`, `cattrs` and `bidict` --
+and the Goal-2 sweep now covers 335 tests. Doing it by hand was deliberate:
+every step is one the stage-6 agent is meant to automate, so the breakages are
+requirements rather than anecdotes.
+
+**Candidate discovery is the bottleneck, not provisioning.** Of 15 libraries
+examined, 6 had Hypothesis property tests. Picking by "popular pure-Python
+computational library" gave 2 of 8; picking from libraries already known to
+use Hypothesis gave 4 of 7. Provisioning, by contrast, was clean: all 6 new
+projects built and collected with no fixes at all, which puts harness repair
+at 3 of 10 overall rather than the 3 of 4 the first batch suggested.
+
+**A third classifier bug, found the way the first two were -- by running it.**
+24 natsort tests came back `quarantined_unstable` with the rationale "baseline
+outcomes differed across seeds: error", from a run with **one** baseline seed.
+One seed cannot differ from itself. The tests error in baseline setup (they are
+locale-dependent), and the gate treated any non-pass, non-fail outcome as
+disagreement. The gate now judges stability on decisive outcomes only: a
+baseline with no pass or fail is `no_baseline_result` and says which outcomes
+it saw, while genuine pass-versus-fail disagreement is still unstable. All 191
+existing tests passed before the fix, so nothing covered this.
+
+**hyperlink's two `crosshair_false_negative` verdicts hold at three seeds and
+200 baseline examples -- and the telemetry says the verdict's name is wrong.**
+Every solver iteration realized a symbolic value, 90% were filtered by the
+test's own `assume()`, and 8% were productive, with 233 realizations forced at
+`(draw data.py:1316) (hostname_labels hypothesis.py:199)`. CrossHair is not
+missing a failure random search found; it never searched. The same two tests
+also fire the observer-effect check. A verdict that reads "baseline fails but
+CrossHair does not" overstates what happened whenever the search was starved.
+
+**The classifier's stated rule and its behavior disagree, and that is a design
+question rather than a bug to fix unilaterally.** `classify.py` opens with
+"Tier-B telemetry may be attached as supporting evidence, but never decides a
+verdict", yet `QUARANTINED_NONDETERMINISTIC` is decided from telemetry. If that
+precedent stands, a degraded search should downgrade a false negative the same
+way; if the rule stands, that branch belongs outside `classify`. Worth a
+decision before either is extended.
+
+### The census at ten projects
+
+335 tests, 192 of which realized at least once.
+
+| realizing frame | iterations | tests | projects | catalogued? |
+| --- | ---: | ---: | ---: | --- |
+| `__format__` (opcode_intercept.py) | 2044 | 67 | 2 | **yes** -- `str.__format__` |
+| `_fullmatch` (relib.py) | 437 | 28 | 1 | no |
+| `__getitem__` (simplestructs.py) | 420 | 44 | **4** | no |
+| `_find` (abcstring.py) | 144 | 16 | 1 | no |
+| `__repr__` (opcode_intercept.py) | 116 | 17 | 2 | no |
+| `__mod__` (opcode_intercept.py) | 96 | 4 | 2 | **yes** -- `float.__mod__` |
+| `draw_integer` (crosshair_provider.py) | 65 | 34 | 4 | artifact of this plugin |
+| eight more | <35 each | | | no |
+
+**Breadth now disagrees with frequency, and breadth is the better signal.**
+`__getitem__` on symbolic containers is reached by four unrelated libraries;
+`__format__` outweighs it four to one in raw iterations but appears in two, and
+most of that is still packaging. A frame many unrelated projects hit is more
+likely to matter generally than one a single project hammers.
+
+**The one-in-a-hundred ratio survived the scaling.** Catalogued gaps reached
+went from 1 to 2 of 100; uncatalogued frames went from 6 to 12. Tripling the
+corpus roughly doubled both, and did not change the conclusion that real
+Hypothesis suites spend their time in CrossHair's own internals -- the regex
+engine, the symbolic containers, string find -- rather than in the catalogued
+Python surface that `fuzz_core_test` enumerates.

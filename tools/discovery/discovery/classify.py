@@ -53,11 +53,17 @@ def baseline_gate(
     verdicts: Dict[str, BaselineVerdict] = {}
     for nodeid in nodeids:
         outcomes = [run.outcome_of(nodeid) for run in runs]
-        if all(o in (Outcome.NOT_RUN, Outcome.SKIPPED) for o in outcomes):
+        # Only a pass or a fail says anything about the test. A seed that
+        # errored, was skipped or never ran produced no opinion to differ
+        # from, and counting it as disagreement reports instability that the
+        # seeds do not show -- including from a single seed, which cannot
+        # differ from itself.
+        decisive = [o for o in outcomes if o in (Outcome.PASSED, Outcome.FAILED)]
+        if not decisive:
             stability = Stability.NO_RESULT
-        elif all(o is Outcome.PASSED for o in outcomes):
+        elif all(o is Outcome.PASSED for o in decisive):
             stability = Stability.STABLE_PASS
-        elif all(o is Outcome.FAILED for o in outcomes):
+        elif all(o is Outcome.FAILED for o in decisive):
             stability = Stability.STABLE_FAIL
         else:
             stability = Stability.UNSTABLE
@@ -135,13 +141,16 @@ def classify(
 
     if baseline.stability is Stability.NO_RESULT:
         result.verdict = Verdict.NO_BASELINE_RESULT
-        result.rationale = "the baseline arm never produced a result for this test"
+        result.rationale = (
+            "the baseline arm produced no pass or fail for this test: "
+            + ", ".join(o.value for o in baseline.outcomes)
+        )
         return result
 
     if baseline.stability is Stability.UNSTABLE:
         result.verdict = Verdict.QUARANTINED_UNSTABLE
-        result.rationale = "baseline outcomes differed across seeds: " + ", ".join(
-            o.value for o in baseline.outcomes
+        result.rationale = "baseline passed on some seeds and failed on others: " + (
+            ", ".join(o.value for o in baseline.outcomes)
         )
         return result
 

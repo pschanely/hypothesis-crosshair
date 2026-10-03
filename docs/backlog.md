@@ -1335,3 +1335,83 @@ bridged that and is now shared rather than private. Then the clue still did
 not fire, because a node id can carry an `observer_effect` classification
 *alongside* its real verdict, and building a node-id-to-verdict map let the
 annotation overwrite the verdict it should have been read against.
+
+---
+
+## B35. Candidate triage, and the asymmetry that runs the other way
+
+Stage 6 begins at the measured bottleneck. B33 found that of 15 libraries
+examined, 6 had Hypothesis property tests, while harness repair was needed for
+only 3 of 10 provisioned projects and 0 of the 6 newest. Finding candidates is
+the expensive part; fixing them is not.
+
+**The error asymmetry is inverted relative to failure triage.** In `triage.py`
+the costly mistake is calling someone else's correct code a bug, because that
+can reach a stranger, so `unclear` is always safe and the decider is pushed
+toward deferring. Here the costly mistake is the opposite one. Admitting a dud
+costs one provisioning and one run, and the report says so. Rejecting a project
+that would have produced findings costs those findings permanently: nothing
+downstream revisits a project that was never queued, and no counter anywhere
+records what was lost.
+
+So `candidates.py` rejects on exactly one fact -- no `@given` test, no state
+machine, and no marker in a file it could not read -- and expresses every other
+concern as a score that orders the queue. A low score is a late slot, never a
+closed door. `test_the_worst_possible_candidate_is_still_runnable` asserts that
+directly: numpy, requests, three fixtures, score under 40, still runnable.
+
+**Parsing with the host interpreter silently hides tests.** The survey reads
+source with `ast.parse`, which uses the grammar of the Python running the
+survey, not the one the project targets. On the corpus this dropped 34 files --
+31 in pint, 3 in cattrs -- all of them PEP 695 syntax that 3.11 cannot parse.
+Those particular files held no `@given`, which was luck. A project whose only
+property tests sat in such a file would have been rejected as having none,
+which is precisely the silent false rejection above. Unparsable files now get a
+textual marker scan; it cannot give strategies or fixtures, but it answers the
+only question that triggers a rejection, and `hidden_tests` keeps the project
+in the queue.
+
+**The scanner agrees with grep exactly.** Across the 11 corpus projects that
+have property tests, the AST count matches `grep -c @given` on every one:
+attrs 59, bidict 8, cattrs 134, dateutil 4, h2 21, hyperlink 14, jsonschema 1,
+natsort 31, packaging 389, priority 7, srt 44. The 8 rejections are all genuine
+-- those projects import `hypothesis` nowhere at all.
+
+**One scoring signal was backwards and is now inverted.** `plain_strategies`
+scored a test down for naming a strategy not in a hardcoded list of Hypothesis
+builtins. Every one of packaging's 13 "unrecognized" strategies turned out to
+be a project-defined `@st.composite` -- `pep440_versions`, `release_segment`,
+`pre_tags` -- so the signal was docking 8 points for having a mature property
+suite. It is now `domain_strategies` and points the other way, which is also
+the better theory: a suite random search has already hammered for years is
+where symbolic execution has the most left to find.
+
+**The score does not predict yield, and cannot yet be shown to.** Against the
+real runs, all 10 non-`no_signal` events landed in the top half of the ranking
+and the bottom half produced zero across 115 tests. That is not evidence: the
+weights were chosen after seeing these projects, so it is a consistency check,
+not a held-out prediction. And packaging is a flat counterexample -- the
+highest score in the corpus, 68 tests run, nothing found. natsort's 24 results
+are excluded as they came from the classifier bug fixed in B33.
+
+The weights are a stated preference about where CrossHair pays off, which the
+`SCORE_WEIGHTS` docstring says outright. They earn their numbers only by being
+revised against what the corpus yields.
+
+**A bug the tests caught.** `import hypothesis.strategies` binds the name
+`hypothesis`, but the alias map pointed that name at the full dotted path,
+clobbering a plain `import hypothesis` so that `@hypothesis.given` resolved to
+`hypothesis.strategies.given` and matched nothing. Any project using that
+import form would have had every property test missed.
+
+**An unobservable guarantee, removed the same way B34 removed one.** `rank`
+sorted on `(not runnable, -score)`, but a blocked project always scores 0, so
+the first key could never change an outcome -- a mutation deleting it was
+uncaught because it was unobservable, not because the test was weak. Ordering
+is now `order()`, taking assessments rather than paths, so the contract can be
+tested on constructed input instead of depending on how `assess` happens to
+score a rejection.
+
+Open: `st.randoms()` is reported as a note rather than scored, because one
+instance in the corpus (bidict) is not enough to weight. Strategy-level fit
+generally needs measuring against outcomes before it earns a number.

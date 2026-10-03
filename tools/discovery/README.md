@@ -190,6 +190,7 @@ defect.
 
 | Module | Role |
 | --- | --- |
+| `candidates.py` | Static survey of a checkout: what it would run, and how promising |
 | `sandbox.py` | Docker and local execution backends, resource ceilings |
 | `_injected_plugin.py` | Runs inside the target env: forces settings, reports outcomes |
 | `runner.py` | One pytest invocation for a given arm and tier |

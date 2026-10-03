@@ -3,8 +3,7 @@
 import os
 import subprocess
 
-from discovery.probe import probe, probe_all
-from discovery.pypi import PackageFacts
+from discovery.probe import Candidate, probe, probe_all
 
 GIVEN = """\
 from hypothesis import given, strategies as st
@@ -29,7 +28,7 @@ def repository(tmp_path, name, files):
         ["git", "commit", "-qm", "initial"],
     ):
         subprocess.run(argv, cwd=root, check=True, capture_output=True)
-    return PackageFacts(name=name, repo_url=str(root))
+    return Candidate(name=name, repo_url=str(root))
 
 
 def test_a_repository_with_property_tests_is_worth_provisioning(tmp_path):
@@ -64,7 +63,7 @@ def test_keeping_a_checkout_leaves_it_for_provisioning(tmp_path):
 
 
 def test_a_repository_that_cannot_be_cloned_is_reported_not_raised(tmp_path):
-    facts = PackageFacts(name="missing", repo_url=str(tmp_path / "nowhere"))
+    facts = Candidate(name="missing", repo_url=str(tmp_path / "nowhere"))
     result = probe(facts, str(tmp_path / "work"))
     assert result.error
     assert result.assessment is None
@@ -75,9 +74,9 @@ def test_a_repository_that_cannot_be_cloned_is_reported_not_raised(tmp_path):
 
 def test_one_unreadable_candidate_does_not_stop_the_rest(tmp_path):
     good = repository(tmp_path, "good", {"tests/test_a.py": GIVEN})
-    broken = PackageFacts(name="broken", repo_url=str(tmp_path / "nowhere"))
+    broken = Candidate(name="broken", repo_url=str(tmp_path / "nowhere"))
     results = list(probe_all([broken, good], str(tmp_path / "work")))
-    assert [r.facts.name for r in results] == ["broken", "good"]
+    assert [r.candidate.name for r in results] == ["broken", "good"]
     assert results[1].worth_provisioning
 
 

@@ -181,6 +181,13 @@ and its conftest files, so runs pass `--confcutdir`, and a project with no
 config of its own also gets an empty `-c`. Without this a project inherits
 collection hooks from whatever happens to sit above it on disk.
 
+**Two candidate sources, with very different economics.** The PyPI download
+ranking discovers whether a project has property tests by cloning it, at a
+measured hit rate of 13 in 150. A recorded index names repositories already
+observed to have them, so the clone confirms rather than discovers: 12 of 12
+on the first batch. An index is a snapshot, so repositories move and tests
+change, and the survey still decides.
+
 **Candidate discovery clones rather than guesses.** PyPI metadata cannot say
 whether a project has Hypothesis tests, because Hypothesis is a development
 dependency and only runtime dependencies are published. A shallow clone plus
@@ -214,6 +221,7 @@ defect.
 | --- | --- |
 | `provision.py` | Builds an environment per project, repairing the harness as needed |
 | `pypi.py` | Ranks package names from PyPI metadata, before anything is cloned |
+| `known_repos.py` | A recorded index of repositories already known to carry tests |
 | `probe.py` | Shallow-clones a candidate, surveys it, and deletes the checkout |
 | `candidates.py` | Static survey of a checkout: what it would run, and how promising |
 | `harness.py` | Diagnoses a suite that will not start, and the repairs allowed for it |

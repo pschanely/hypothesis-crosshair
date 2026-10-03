@@ -1,10 +1,16 @@
-"""Entry point for finding projects worth provisioning, from PyPI downwards."""
+"""Entry point for finding projects worth provisioning.
+
+Candidates come either from the PyPI download ranking, where whether a
+project has property tests is discovered by cloning it, or from a recorded
+index of repositories already known to carry them.
+"""
 
 import argparse
 import json
 import sys
 from typing import List, Optional
 
+from .known_repos import candidates as recorded_candidates
 from .probe import probe_all
 from .pypi import facts_from, metadata, shortlist, top_packages
 
@@ -18,6 +24,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         ),
     )
     parser.add_argument("--top", type=int, default=200, help="packages to consider")
+    parser.add_argument(
+        "--index",
+        default="",
+        help=(
+            "a recorded index of repositories known to carry Hypothesis "
+            "tests, used instead of the PyPI download ranking"
+        ),
+    )
     parser.add_argument("--budget", type=int, default=25, help="checkouts to fetch")
     parser.add_argument("--cache", default="", help="directory for PyPI responses")
     parser.add_argument("--work", required=True, help="directory for checkouts")
@@ -27,18 +41,26 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
 
-    rows = top_packages(args.top)
-    facts = []
-    for row in rows:
-        payload = metadata(row["project"], args.cache)
-        if payload is not None:
-            facts.append(facts_from(payload, row["download_count"]))
-    chosen = shortlist(facts, args.budget)
-    print(
-        f"{len(facts)} packages read, {len(chosen)} cloned of "
-        f"{len([f for f in facts if f.repo_url])} with a repository",
-        file=sys.stderr,
-    )
+    if args.index:
+        chosen = recorded_candidates(args.index, args.budget)
+        print(
+            f"{len(chosen)} candidate(s) from the recorded index",
+            file=sys.stderr,
+        )
+    else:
+        rows = top_packages(args.top)
+        facts = []
+        for row in rows:
+            payload = metadata(row["project"], args.cache)
+            if payload is not None:
+                facts.append(facts_from(payload, row["download_count"]))
+        shortlisted = shortlist(facts, args.budget)
+        print(
+            f"{len(facts)} packages read, {len(shortlisted)} cloned of "
+            f"{len([f for f in facts if f.repo_url])} with a repository",
+            file=sys.stderr,
+        )
+        chosen = [f.as_candidate() for f in shortlisted]
 
     results = []
     for result in probe_all(chosen, args.work, keep=args.keep):
@@ -53,8 +75,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             json.dumps(
                 [
                     {
-                        "name": r.facts.name,
-                        "repo": r.facts.repo_url,
+                        "name": r.candidate.name,
+                        "repo": r.candidate.repo_url,
                         "score": r.assessment.score,
                         "property_tests": len(r.assessment.survey.tests),
                         "state_machines": len(r.assessment.survey.state_machines),

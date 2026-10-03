@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence, Set
 
 from .candidates import OPAQUE_IMPORTS
+from .probe import Candidate
 
 #: Download ranks published from the public PyPI download tables.
 TOP_PACKAGES_URL = (
@@ -90,6 +91,11 @@ class PackageFacts:
             return None
         return self.wheel_tags == {"any"}
 
+    def as_candidate(self) -> "Candidate":
+        return Candidate(
+            name=self.name, repo_url=self.repo_url, source="pypi-downloads"
+        )
+
     @property
     def opaque_dependencies(self) -> List[str]:
         return sorted(
@@ -101,8 +107,9 @@ class PackageFacts:
         )
 
 
-def _requirement_name(requirement: str) -> str:
-    for separator in (";", "[", "(", "=", "<", ">", "!", "~", " "):
+def requirement_name(requirement: str) -> str:
+    """The distribution a requirement line names, without version or extras."""
+    for separator in (";", "[", "(", "=", "<", ">", "!", "~", " ", "#"):
         requirement = requirement.split(separator)[0]
     return requirement.strip().lower().replace("_", "-")
 
@@ -163,7 +170,7 @@ def facts_from(payload: dict, downloads: int = 0) -> PackageFacts:
         repo_url=repository_url(info),
         wheel_tags=_wheel_tags(payload.get("urls") or []),
         runtime_dependencies=[
-            _requirement_name(req) for req in (info.get("requires_dist") or [])
+            requirement_name(req) for req in (info.get("requires_dist") or [])
         ],
         requires_python=info.get("requires_python") or "",
     )

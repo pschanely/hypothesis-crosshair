@@ -1687,3 +1687,43 @@ ran its one surviving Hypothesis test to `no_signal`.
 
 The repair record travels with the result: `pytest_args` and `env` are what a
 later run has to carry, and the named repairs say what the project needed.
+
+---
+
+## B41. A second candidate source, and why it changes the economics
+
+A recorded index of 1151 GitHub repositories, each with the Hypothesis node
+ids seen in it and a resolved `requirements.txt`. 1000 carry at least one
+test.
+
+**It inverts what the clone is for.** Through PyPI the clone *discovers*
+whether a project has property tests, at 13 of 150. Through the index every
+entry was observed to have them, so the clone *confirms*: the first batch of
+12 came back 12 of 12, and the repositories still existed despite the index
+being roughly a year old.
+
+**Ranking by test count alone is the wrong order.** The first pass put abTEM
+(1168 tests, 135 dependencies including numpy and dask) at the top, which is
+the worst kind of candidate: the solver realizes at the array boundary and
+the run degrades to slow random testing. The recorded requirements carry that
+signal without a clone, so an entry with an array or dataframe dependency now
+sorts after every entry without one however many tests it has. 620 of the
+1000 are free of one, and the queue head becomes pure-Python
+number theory, balanced trees, polygon clipping and arbitrary-precision
+arithmetic -- the profile section 3 of the design describes.
+
+**The recorded pins are unusable as pins and useful as names.** Every entry
+pins `hypothesis==6.112.5`, which the plugin predates; installing that would
+fight provisioning. Only the distribution names are taken, and the ones
+provisioning supplies itself are dropped.
+
+**`probe` no longer depends on PyPI.** Its input is a `Candidate` -- a name,
+a URL, where the suggestion came from, and what the source happened to know
+(recorded node ids, test dependencies). `PackageFacts.as_candidate()` and
+`KnownRepo.as_candidate()` both produce one, so a third source is an adapter
+rather than a change to the probe.
+
+Open: the recorded node ids are carried but not yet used. They could check
+the survey against what the index saw, which would measure how much a
+year-old index has drifted -- and a test the index recorded that the survey
+cannot find now is a more interesting signal than either on its own.

@@ -13,14 +13,28 @@ import os
 import shutil
 import subprocess
 import time
-from dataclasses import dataclass
-from typing import Iterator, Optional, Sequence
+from dataclasses import dataclass, field
+from typing import Iterator, List, Optional, Sequence
 
 from .candidates import Assessment, assess, survey
-from .pypi import PackageFacts
 
 #: Commits fetched per candidate. Only the current tree is ever read.
 CLONE_DEPTH = 1
+
+
+@dataclass
+class Candidate:
+    """A repository worth looking inside, and where the suggestion came from."""
+
+    name: str
+    repo_url: str
+    #: The source that proposed it, kept so a run's provenance is readable.
+    source: str = ""
+    #: Node ids a previous survey of this repository recorded, if any.
+    known_nodeids: List[str] = field(default_factory=list)
+    #: Distribution names the project's tests need, without versions.
+    test_dependencies: List[str] = field(default_factory=list)
+
 
 CLONE_TIMEOUT = 300.0
 
@@ -34,7 +48,7 @@ MAX_CHECKOUT_MB = 500
 class ProbeResult:
     """What one candidate turned out to be, once its source was read."""
 
-    facts: PackageFacts
+    candidate: Candidate
     assessment: Optional[Assessment] = None
     error: str = ""
     seconds: float = 0.0
@@ -46,13 +60,13 @@ class ProbeResult:
 
     def describe(self) -> str:
         if self.error:
-            return f"{self.facts.name}: could not read -- {self.error}"
+            return f"{self.candidate.name}: could not read -- {self.error}"
         found = self.assessment
         if not found.runnable:
-            return f"{self.facts.name}: no property tests"
+            return f"{self.candidate.name}: no property tests"
         return (
-            f"{self.facts.name}: score {found.score}, {found.units} property "
-            f"tests  {self.facts.repo_url}"
+            f"{self.candidate.name}: score {found.score}, {found.units} property "
+            f"tests  {self.candidate.repo_url}"
         )
 
 
@@ -80,22 +94,22 @@ def clone(repo_url: str, dest: str, timeout: float = CLONE_TIMEOUT) -> None:
 
 
 def probe(
-    facts: PackageFacts,
+    candidate: Candidate,
     work_dir: str,
     keep: bool = False,
     timeout: float = CLONE_TIMEOUT,
     max_megabytes: int = MAX_CHECKOUT_MB,
 ) -> ProbeResult:
     """Clone one candidate, survey it, and remove the checkout again."""
-    dest = os.path.join(work_dir, facts.name)
+    dest = os.path.join(work_dir, candidate.name)
     shutil.rmtree(dest, ignore_errors=True)
     started = time.monotonic()
     try:
-        clone(facts.repo_url, dest, timeout)
+        clone(candidate.repo_url, dest, timeout)
     except (RuntimeError, subprocess.TimeoutExpired, OSError) as exc:
         shutil.rmtree(dest, ignore_errors=True)
         return ProbeResult(
-            facts,
+            candidate,
             error=str(exc) or type(exc).__name__,
             seconds=time.monotonic() - started,
         )
@@ -103,7 +117,7 @@ def probe(
     if max_megabytes and size > max_megabytes:
         shutil.rmtree(dest, ignore_errors=True)
         return ProbeResult(
-            facts,
+            candidate,
             error=f"checkout is {size}MB, over the {max_megabytes}MB budget",
             seconds=time.monotonic() - started,
             megabytes=size,
@@ -114,7 +128,7 @@ def probe(
         if not keep:
             shutil.rmtree(dest, ignore_errors=True)
     return ProbeResult(
-        facts,
+        candidate,
         assessment=found,
         seconds=time.monotonic() - started,
         megabytes=size,
@@ -122,7 +136,7 @@ def probe(
 
 
 def probe_all(
-    every: Sequence[PackageFacts],
+    every: Sequence[Candidate],
     work_dir: str,
     keep: bool = False,
     timeout: float = CLONE_TIMEOUT,
@@ -130,9 +144,9 @@ def probe_all(
 ) -> Iterator[ProbeResult]:
     """Probe candidates in order, yielding each result as it is read."""
     os.makedirs(work_dir, exist_ok=True)
-    for facts in every:
+    for candidate in every:
         yield probe(
-            facts,
+            candidate,
             work_dir,
             keep=keep,
             timeout=timeout,

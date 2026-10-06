@@ -77,6 +77,20 @@ class SpanTracker:
         return max(self.span_depths.values(), default=0)
 
 
+def _max_uninteresting_iterations() -> int:
+    name = "HYPOTHESIS_CROSSHAIR_MAX_UNINTERESTING_ITERATIONS"
+    value = os.environ.get(name, "")
+    if value == "":
+        return 0
+    try:
+        count = int(value)
+    except ValueError:
+        count = -1
+    if count < 0:
+        raise InvalidArgument(f"{name} must be a non-negative integer; got {value!r}")
+    return count
+
+
 class CrossHairPrimitiveProvider(PrimitiveProvider):
     """An implementation of PrimitiveProvider based on CrossHair."""
 
@@ -89,6 +103,7 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
         self.constrained_oracle = ConstrainedOracle(self.search_root.pathing_oracle)
         self.search_root.pathing_oracle = self.constrained_oracle
         self.covering = True
+        self.max_uninteresting_iterations = _max_uninteresting_iterations()
         if len(os.environ.get("DEBUG_CROSSHAIR", "")) > 0:
             self.debug_to_stderr = os.environ["DEBUG_CROSSHAIR"].lower() not in (
                 "0",
@@ -164,6 +179,12 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                 self.exhausted = True
         self._previous_space = None
 
+    def _has_stopped_discovering(self) -> bool:
+        if self.max_uninteresting_iterations <= 0:
+            return False
+        since_discovery = self.constrained_oracle.inner_oracle.iters_since_discovery
+        return since_discovery > self.max_uninteresting_iterations
+
     def set_completion(self, msg: str):
         debug("completion:", msg)
         self.completion = msg
@@ -204,6 +225,14 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                 raise BackendCannotProceed("verified")
             else:
                 raise BackendCannotProceed("exhausted")
+        if self._has_stopped_discovering():
+            # Hypothesis treats "exhausted" as "switch to the Hypothesis
+            # provider"; it does not end the test run.
+            self.set_completion(
+                "stopped: no new code locations reached in "
+                f"{self.max_uninteresting_iterations} iterations"
+            )
+            raise BackendCannotProceed("exhausted")
         space = self._make_statespace()
         if self._replay_queue:
             # Warm-start: hand the next queued corpus input to CrossHair as a

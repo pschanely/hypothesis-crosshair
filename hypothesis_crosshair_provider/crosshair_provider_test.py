@@ -7,9 +7,9 @@ from crosshair.util import (
     UnexploredPath,
     UnknownSatisfiability,
 )
-from hypothesis import settings
+from hypothesis import given, settings
 from hypothesis import strategies as st
-from hypothesis.errors import BackendCannotProceed
+from hypothesis.errors import BackendCannotProceed, InvalidArgument
 from hypothesis.internal.conjecture.provider_conformance import run_conformance_test
 from hypothesis.internal.intervalsets import IntervalSet
 
@@ -249,3 +249,50 @@ def test_unsat_during_user_exception_realization(solver_is_sat_mock):
             s_int = provider.draw_integer()
             raise TargetException
     assert solver_is_sat_mock.call_count == 1
+
+
+def test_stops_after_too_many_iterations_without_new_code_locations(monkeypatch):
+    monkeypatch.setenv("HYPOTHESIS_CROSSHAIR_MAX_UNINTERESTING_ITERATIONS", "3")
+    provider = CrossHairPrimitiveProvider()
+    inner = provider.constrained_oracle.inner_oracle
+    monkeypatch.setattr(inner, "post_path_hook", lambda path: None)
+
+    inner.iters_since_discovery = 3
+    with provider.per_test_case_context_manager():
+        if provider.draw_integer() > 10:
+            pass
+
+    inner.iters_since_discovery = 4
+    with pytest.raises(BackendCannotProceed) as excinfo:
+        with provider.per_test_case_context_manager():
+            pass
+    assert excinfo.value.scope == "exhausted"
+    assert "no new code locations" in provider.completion
+
+
+def test_never_stops_for_lack_of_discovery_by_default(monkeypatch):
+    monkeypatch.delenv("HYPOTHESIS_CROSSHAIR_MAX_UNINTERESTING_ITERATIONS", False)
+    provider = CrossHairPrimitiveProvider()
+    assert provider.max_uninteresting_iterations == 0
+    provider.constrained_oracle.inner_oracle.iters_since_discovery = 10**6
+    assert not provider._has_stopped_discovering()
+
+
+@pytest.mark.parametrize("value", ["abc", "-5", "10 x"])
+def test_invalid_max_uninteresting_iterations(monkeypatch, value):
+    monkeypatch.setenv("HYPOTHESIS_CROSSHAIR_MAX_UNINTERESTING_ITERATIONS", value)
+    with pytest.raises(InvalidArgument):
+        CrossHairPrimitiveProvider()
+
+
+def test_stopping_falls_back_to_hypothesis_provider(monkeypatch):
+    monkeypatch.setenv("HYPOTHESIS_CROSSHAIR_MAX_UNINTERESTING_ITERATIONS", "1")
+    calls = []
+
+    @settings(backend="crosshair", database=None, max_examples=30, deadline=None)
+    @given(st.booleans())
+    def test(b):
+        calls.append(b)
+
+    test()
+    assert len(calls) >= 2

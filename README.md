@@ -56,11 +56,14 @@ pytest . --hypothesis-profile=crosshair
 ## Changelog
 
 ### Next Version
+* Nothing yet!
+
+### 0.0.31
 * Set `HYPOTHESIS_CROSSHAIR_MAX_UNINTERESTING_ITERATIONS` to stop symbolic
   exploration once that many consecutive iterations have reached no new code
   locations. Hypothesis then runs its remaining examples (up to `max_examples`)
   with its normal random generation, so this does not bound total test time.
-  The test is not reported as verified. Unset (or 0) by default.
+  Unset by default.
 
 ### 0.0.30
 * Avoid a spurious InvalidArgument error from hypothesis when CrossHair

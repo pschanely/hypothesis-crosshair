@@ -57,8 +57,8 @@ pytest . --hypothesis-profile=crosshair
 
 ### Next Version
 * Follow the probability `p` that Hypothesis passes to `draw_boolean`, instead
-  of CrossHair's default (which favors `False`). For example, lists drawn by
-  CrossHair are now about as long as Hypothesis's own.
+  of CrossHair's default (which favors `False`). Collections drawn by CrossHair
+  are no longer biased toward being short.
 
 ### 0.0.31
 * Set `HYPOTHESIS_CROSSHAIR_MAX_UNINTERESTING_ITERATIONS` to stop symbolic

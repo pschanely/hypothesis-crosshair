@@ -372,11 +372,8 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                 self._apply_next_hint(symbolic)
                 span_depth = self.span_tracker.depth()
                 if span_depth >= 4:
-                    self._bias_towards_value(
-                        symbolic,
-                        False,
-                        probability=span_depth / (span_depth + 2),
-                    )
+                    p = min(p, 2 / (span_depth + 2))
+                self._bias_towards_value(symbolic, True, probability=p)
             else:
                 return self._replayed_draw(bool)
             self._remember_draw(symbolic)

@@ -72,6 +72,15 @@ def test_string_draw_with_no_intervals():
     assert x == ""
 
 
+@pytest.mark.parametrize("p", [0.1, 0.9])
+def test_draw_boolean_follows_p(p):
+    provider = CrossHairPrimitiveProvider()
+    with provider.per_test_case_context_manager():
+        draws = [provider.draw_boolean(p) for _ in range(40)]
+    true_ct = sum(map(provider.realize, draws))
+    assert abs(true_ct / len(draws) - p) < 0.2
+
+
 def test_post_run_value_export():
     provider = CrossHairPrimitiveProvider()
     with provider.per_test_case_context_manager():

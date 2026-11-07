@@ -15,7 +15,7 @@ uv sync
 
 ## Checks
 
-Run all three before committing; CI runs them across Python 3.9–3.14.
+Run all three before committing; CI runs them across Python 3.10–3.15.
 
 ```
 uv run black --check .   # formatting (uv run black . to fix)

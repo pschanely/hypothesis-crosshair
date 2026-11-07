@@ -266,7 +266,7 @@ class CrossHairPrimitiveProvider(PrimitiveProvider):
                             (BackendCannotProceed, UnexploredPath, KeyboardInterrupt),
                         ):
                             with ResumedTracing():
-                                space.detach_path(currently_handling=current_exc)
+                                space.detach_path(current_exc)
             self.set_completion("completed normally")
             debug("ended iteration (normal completion)")
         except (IgnoreAttempt, UnexploredPath, NotDeterministic) as exc:

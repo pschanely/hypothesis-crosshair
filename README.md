@@ -56,7 +56,9 @@ pytest . --hypothesis-profile=crosshair
 ## Changelog
 
 ### Next Version
-* Nothing yet!
+* Support the upcoming CrossHair release (after 0.0.113). Without this update,
+  most tests will fail with nondeterminism errors under that release.
+* Drop support for Python 3.9, and add support for Python 3.15.
 
 ### 0.0.32
 * Follow the probability `p` that Hypothesis passes to `draw_boolean`, instead

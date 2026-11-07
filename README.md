@@ -56,7 +56,8 @@ pytest . --hypothesis-profile=crosshair
 ## Changelog
 
 ### Next Version
-* Nothing yet!
+* Fix compatibility with the latest CrossHair, where most tests failed with
+  nondeterminism errors.
 
 ### 0.0.32
 * Follow the probability `p` that Hypothesis passes to `draw_boolean`, instead
